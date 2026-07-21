@@ -30,6 +30,7 @@ def download_media(url, is_audio=False, progress_callback=None):
         'no_warnings': True,
         'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
         'progress_hooks': [yt_dlp_hook] if progress_callback else [],
+        'js_runtimes': {'nodejs': {}, 'node': {}},
     }
     
     # Use cookies file if available (helps bypass YouTube bot detection on cloud servers)
