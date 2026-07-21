@@ -243,6 +243,23 @@ async def button_callback(client, callback_query):
             image_url = ""
             if "data" in data and "url" in data["data"]:
                 image_url = data["data"]["url"].replace("tmpfiles.org/", "tmpfiles.org/dl/")
+                
+            # Perform OCR to extract text from the image for the AI
+            extracted_text = ""
+            try:
+                with open(file_path, "rb") as f:
+                    ocr_res = requests.post(
+                        "https://api.ocr.space/parse/image",
+                        files={"filename": f},
+                        data={"apikey": "helloworld", "language": "eng"}
+                    )
+                ocr_data = ocr_res.json()
+                if not ocr_data.get("IsErroredOnProcessing") and ocr_data.get("ParsedResults"):
+                    parsed_text = ocr_data["ParsedResults"][0].get("ParsedText", "").strip()
+                    if parsed_text:
+                        extracted_text = f"\n\n[Extracted Text from Image:]\n{parsed_text}"
+            except Exception as e:
+                print(f"OCR Error: {e}")
             
             # Clean up local file
             cleanup_file(file_path)
@@ -252,7 +269,8 @@ async def button_callback(client, callback_query):
                 return
                 
             # Prepare prompt
-            prompt = original_msg.caption if original_msg.caption else "Describe this image in detail."
+            prompt = original_msg.caption if original_msg.caption else "Analyze this image and its text in detail."
+            prompt += extracted_text
             
             # Get AI response
             reply = await get_ai_response(query_msg.chat.id, prompt, image_url=image_url)
