@@ -21,18 +21,15 @@ def is_url(text):
 async def start_command(client, message):
     welcome_message = (
         "Welcome to the Media Downloader and Converter Bot!\n\n"
-        "Send me a link to download video/audio (e.g., YouTube, TikTok).\n"
-        "Send me a video or image file to convert it."
-    )
-    keyboard = ReplyKeyboardMarkup(
-        [
-            ["📥 Download Media", "🔄 Convert Media"],
-            ["ℹ️ Help"]
-        ],
-        resize_keyboard=True
+        "To see all available commands, type `/` or tap the Menu button.\n\n"
+        "Here are a few things I can do:\n"
+        "• Send me a link and type `/download` to download video/audio.\n"
+        "• Send me a video or image file to convert it.\n"
+        "• Just chat with me, ask questions, or tell me to draw an image!"
     )
     
-    await message.reply_text(welcome_message, reply_markup=keyboard)
+    from pyrogram.types import ReplyKeyboardRemove
+    await message.reply_text(welcome_message, reply_markup=ReplyKeyboardRemove())
 
 @Client.on_message(filters.regex("^(📥 Download Media|🔄 Convert Media)$"))
 async def handle_menu(client, message):
@@ -233,7 +230,12 @@ async def button_callback(client, callback_query):
                 is_media = True
                 mime_type = "audio"
             elif original_msg.document:
-                mime_type = original_msg.document.mime_type
+                mime_type = str(original_msg.document.mime_type or "")
+                file_name = str(original_msg.document.file_name or "").lower()
+                if mime_type.startswith("video/") or mime_type.startswith("audio/") or file_name.endswith(('.mp4', '.mkv', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.m4a')):
+                    is_media = True
+                else:
+                    is_media = False
                 
             text = ""
             if is_media:

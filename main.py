@@ -55,7 +55,30 @@ def main():
         plugins=dict(root="plugins")
     )
     
-    app.run()
+    app.start()
+    
+    async def set_commands():
+        from pyrogram.types import BotCommand
+        try:
+            await app.set_bot_commands([
+                BotCommand("start", "Start the bot"),
+                BotCommand("download", "Download media from a link"),
+                BotCommand("convert", "Convert a media file"),
+                BotCommand("image", "Generate an image with AI"),
+                BotCommand("ask", "Ask the AI a question"),
+                BotCommand("search", "Search the web"),
+                BotCommand("help", "Show help info")
+            ])
+            logger.info("Bot commands menu set successfully!")
+        except Exception as e:
+            logger.error(f"Failed to set bot commands: {e}")
+            
+    app.loop.run_until_complete(set_commands())
+    
+    import pyrogram
+    pyrogram.idle()
+    
+    app.stop()
 
 if __name__ == "__main__":
     main()
