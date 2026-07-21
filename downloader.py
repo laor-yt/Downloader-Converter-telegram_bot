@@ -1,0 +1,95 @@
+import os
+import uuid
+import yt_dlp
+import requests
+import imageio_ffmpeg
+from urllib.parse import urlparse
+from utils import get_temp_dir
+
+def download_media(url, is_audio=False, progress_callback=None):
+    """
+    Downloads media from a URL using yt-dlp.
+    If is_audio is True, it extracts the best audio.
+    Returns the path to the downloaded file.
+    """
+    temp_dir = get_temp_dir()
+    file_id = str(uuid.uuid4())
+    
+    def yt_dlp_hook(d):
+        if d['status'] == 'downloading' and progress_callback:
+            percent = d.get('_percent_str', 'N/A')
+            speed = d.get('_speed_str', 'N/A')
+            size = d.get('_total_bytes_str') or d.get('_total_bytes_estimate_str', 'N/A')
+            text = f"Downloading... {percent.strip()} of {size.strip()} at {speed.strip()}"
+            progress_callback(text)
+    
+    # yt-dlp options
+    ydl_opts = {
+        'outtmpl': os.path.join(temp_dir, f'{file_id}.%(ext)s'),
+        'quiet': True,
+        'no_warnings': True,
+        'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
+        'progress_hooks': [yt_dlp_hook] if progress_callback else [],
+    }
+    
+    if is_audio:
+        ydl_opts.update({
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        })
+    else:
+        ydl_opts.update({
+            'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best',
+            'merge_output_format': 'mp4',
+        })
+        
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info_dict = ydl.extract_info(url, download=True)
+            if is_audio:
+                # yt-dlp might have converted it to mp3
+                downloaded_file = os.path.join(temp_dir, f"{file_id}.mp3")
+                if not os.path.exists(downloaded_file):
+                    # fallback if postprocessor didn't run or rename it as expected
+                    downloaded_file = ydl.prepare_filename(info_dict)
+                    # wait, prepare_filename gives the original, the postprocessor renames it.
+                    # let's just find the file that starts with file_id in temp_dir
+                    for f in os.listdir(temp_dir):
+                        if f.startswith(file_id):
+                            downloaded_file = os.path.join(temp_dir, f)
+                            break
+            else:
+                downloaded_file = ydl.prepare_filename(info_dict)
+            return downloaded_file
+    except Exception as e:
+        print(f"Error downloading with yt-dlp: {e}")
+        return None
+
+def download_direct_file(url):
+    """
+    Downloads a file directly using requests. (useful for direct image links)
+    """
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        
+        parsed_url = urlparse(url)
+        filename = os.path.basename(parsed_url.path)
+        if not filename:
+            filename = f"{uuid.uuid4()}.file"
+            
+        temp_dir = get_temp_dir()
+        filepath = os.path.join(temp_dir, f"{uuid.uuid4()}_{filename}")
+        
+        with open(filepath, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+                
+        return filepath
+    except Exception as e:
+        print(f"Error downloading direct file: {e}")
+        return None
