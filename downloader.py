@@ -54,8 +54,8 @@ def download_media(url, is_audio=False, progress_callback=None):
     # else:
     #     print(f"⚠️ No cookies file found at {cookies_path}. YouTube might block downloads.")
     
-    # Telegram bot file size limit is 50MB
-    MAX_SIZE_BYTES = 49 * 1024 * 1024  # 49MB to be safe
+    # Telegram bot file size limit is 50MB on public API, but up to 2GB on Local API Server
+    MAX_SIZE_BYTES = 1950 * 1024 * 1024  # 1950MB to be safe
 
     if is_audio:
         ydl_opts.update({
@@ -74,6 +74,9 @@ def download_media(url, is_audio=False, progress_callback=None):
         
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # We don't need to specify max_filesize since yt-dlp will download the whole thing 
+            # and we check size before returning
+            
             info_dict = ydl.extract_info(url, download=True)
             downloaded_file = None
             for f in os.listdir(temp_dir):
@@ -86,7 +89,7 @@ def download_media(url, is_audio=False, progress_callback=None):
                 file_size = os.path.getsize(downloaded_file)
                 if file_size > MAX_SIZE_BYTES:
                     os.remove(downloaded_file)
-                    print(f"File too large: {file_size / 1024 / 1024:.1f}MB, limit is 49MB")
+                    print(f"File too large: {file_size / 1024 / 1024 / 1024:.2f}GB, limit is 1.95GB")
                     return 'TOO_LARGE'
             
             return downloaded_file

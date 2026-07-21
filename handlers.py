@@ -178,7 +178,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if filepath == 'TOO_LARGE':
             try:
-                await query.edit_message_text(text="❌ File is too large to send via Telegram (max 49MB). Try downloading audio only instead.")
+                await query.edit_message_text(text="❌ File is too large to send via Telegram (limit is 1.95GB).")
             except Exception:
                 pass
         elif filepath == 'BOT_DETECTED':
