@@ -20,7 +20,7 @@ def is_url(text):
 @Client.on_message(filters.command(["start"]) | filters.regex("^(ℹ️ Help)$"))
 async def start_command(client, message):
     welcome_message = (
-        "👋 Welcome to the **Media Downloader and Converter Bot**!\n\n"
+        "👋 Welcome to the **Telegram AI Bot**!\n\n"
         "To see all available commands, tap the Menu button or use the buttons below."
     )
     
@@ -74,7 +74,7 @@ async def handle_start_menu(client, query):
 @Client.on_callback_query(filters.regex("^start_menu$"))
 async def handle_back_to_start(client, query):
     welcome_message = (
-        "👋 Welcome to the **Media Downloader and Converter Bot**!\n\n"
+        "👋 Welcome to the **Telegram AI Bot**!\n\n"
         "To see all available commands, tap the Menu button or use the buttons below."
     )
     keyboard = InlineKeyboardMarkup([
