@@ -235,11 +235,14 @@ async def button_callback(client, callback_query):
             # Download the image
             file_path = await client.download_media(original_msg)
             
-            # Upload to catbox.moe
+            # Upload to tmpfiles.org
             with open(file_path, "rb") as f:
-                response = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": (os.path.basename(file_path), f)})
+                response = requests.post("https://tmpfiles.org/api/v1/upload", files={"file": f})
                 
-            image_url = response.text.strip()
+            data = response.json()
+            image_url = ""
+            if "data" in data and "url" in data["data"]:
+                image_url = data["data"]["url"].replace("tmpfiles.org/", "tmpfiles.org/dl/")
             
             # Clean up local file
             cleanup_file(file_path)
