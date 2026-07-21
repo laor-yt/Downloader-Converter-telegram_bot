@@ -43,27 +43,18 @@ def download_media(url, is_audio=False, progress_callback=None):
         })
     else:
         ydl_opts.update({
-            'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best',
+            'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
             'merge_output_format': 'mp4',
         })
         
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(url, download=True)
-            if is_audio:
-                # yt-dlp might have converted it to mp3
-                downloaded_file = os.path.join(temp_dir, f"{file_id}.mp3")
-                if not os.path.exists(downloaded_file):
-                    # fallback if postprocessor didn't run or rename it as expected
-                    downloaded_file = ydl.prepare_filename(info_dict)
-                    # wait, prepare_filename gives the original, the postprocessor renames it.
-                    # let's just find the file that starts with file_id in temp_dir
-                    for f in os.listdir(temp_dir):
-                        if f.startswith(file_id):
-                            downloaded_file = os.path.join(temp_dir, f)
-                            break
-            else:
-                downloaded_file = ydl.prepare_filename(info_dict)
+            downloaded_file = None
+            for f in os.listdir(temp_dir):
+                if f.startswith(file_id) and not f.endswith('.part') and not f.endswith('.ytdl'):
+                    downloaded_file = os.path.join(temp_dir, f)
+                    break
             return downloaded_file
     except Exception as e:
         print(f"Error downloading with yt-dlp: {e}")
