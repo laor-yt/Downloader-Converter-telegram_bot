@@ -31,7 +31,7 @@ def download_media(url, is_audio=False, progress_callback=None):
         'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
         'progress_hooks': [yt_dlp_hook] if progress_callback else [],
         'js_runtimes': {'nodejs': {}, 'node': {}},
-        'extractor_args': {'youtube': {'player_client': ['android_vr']}},
+        'extractor_args': {'youtube': {'player_client': ['ios', 'tv', 'android', 'web_creator']}},
     }
     
     # Use cookies file if available (helps bypass YouTube bot detection on cloud servers)
@@ -63,15 +63,21 @@ def download_media(url, is_audio=False, progress_callback=None):
         })
     else:
         ydl_opts.update({
-            'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'merge_output_format': 'mp4',
         })
-        
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # We don't need to specify max_filesize since yt-dlp will download the whole thing 
-            # and we check size before returning
+            # First extract info without downloading to see if it's too large
+            info = ydl.extract_info(url, download=False)
             
+            # Check filesize if available
+            filesize = info.get('filesize') or info.get('filesize_approx')
+            if filesize and filesize > MAX_SIZE_BYTES:
+                print(f"File too large: {filesize / 1024 / 1024 / 1024:.2f}GB")
+                return 'TOO_LARGE'
+                
             info_dict = ydl.extract_info(url, download=True)
             downloaded_file = None
             for f in os.listdir(temp_dir):
@@ -93,19 +99,35 @@ def download_media(url, is_audio=False, progress_callback=None):
         print(f"Error downloading with yt-dlp: {e}")
         
         # Fallback to pytubefix if YouTube blocked the cloud IP
-        if 'Sign in to confirm' in error_str or 'bot' in error_str.lower() or 'Requested format is not available' in error_str:
+        if 'Sign in to confirm' in error_str or 'bot' in error_str.lower() or 'Requested format is not available' in error_str or 'HTTP Error 400' in error_str or 'HTTP Error 403' in error_str:
             print("YouTube blocked yt-dlp. Attempting fallback with pytubefix...")
             try:
                 from pytubefix import YouTube
-                yt = YouTube(url)
+                # Fallback sequentially through clients
+                yt = None
+                for client in ['ANDROID', 'TV', 'MWEB']:
+                    try:
+                        yt = YouTube(url, client=client)
+                        # trigger network request to see if it works
+                        test_title = yt.title
+                        break
+                    except Exception:
+                        continue
+                        
+                if yt is None:
+                    yt = YouTube(url) # try default
+                
                 temp_dir = get_temp_dir()
                 if is_audio:
                     ys = yt.streams.get_audio_only()
                     out_file = ys.download(output_path=temp_dir)
-                    # Convert to mp3
+                    # Convert to mp3 using pydub
+                    from pydub import AudioSegment
+                    audio = AudioSegment.from_file(out_file)
                     base, ext = os.path.splitext(out_file)
                     new_file = base + '.mp3'
-                    os.rename(out_file, new_file)
+                    audio.export(new_file, format="mp3")
+                    os.remove(out_file)
                     return new_file
                 else:
                     ys = yt.streams.get_highest_resolution()
