@@ -111,23 +111,25 @@ async def search_command(client: Client, message: Message):
         await processing_msg.edit_text("Sorry, an error occurred while searching the web.")
 
 # Handle mentions and replies to the bot in groups
-@Client.on_message(filters.text & filters.group & ~filters.command(["start", "help", "ask", "search", "image"]), group=1)
+@Client.on_message(filters.text & filters.group & ~filters.command(["start", "help", "ask", "search", "image", "download", "convert", "finance", "market"]), group=1)
 async def group_ai_chat(client: Client, message: Message):
     bot = await client.get_me()
     
-    is_reply_to_bot = False
-    if message.reply_to_message and message.reply_to_message.from_user:
-        is_reply_to_bot = message.reply_to_message.from_user.id == bot.id
-        
-    is_mentioned = False
-    if message.text and f"@{bot.username}" in message.text:
-        is_mentioned = True
-        
-    if is_reply_to_bot or is_mentioned:
-        # Clean the prompt from the bot's username
+    is_reply_to_bot = (
+        message.reply_to_message and 
+        message.reply_to_message.from_user and 
+        message.reply_to_message.from_user.id == bot.id
+    )
+    
+    is_mention = (
+        message.text and 
+        f"@{bot.username}" in message.text
+    )
+    
+    if is_reply_to_bot or is_mention:
         prompt = message.text.replace(f"@{bot.username}", "").strip()
         if not prompt:
-            prompt = "Hello!"
+            return
             
         processing_msg = await message.reply_text("🤔 Thinking...", reply_to_message_id=message.id)
         reply = await get_ai_response(message.chat.id, prompt)
@@ -139,13 +141,9 @@ async def group_ai_chat(client: Client, message: Message):
             await processing_msg.edit_text(reply)
 
 # Handle AI chat in private messages (if it's not a URL or command)
-@Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "ask", "search", "image"]), group=1)
+@Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "ask", "search", "image", "download", "convert", "finance", "market"]), group=1)
 async def private_ai_chat(client: Client, message: Message):
     text = message.text
-    # Let handlers.py handle URLs
-    if "http://" in text or "https://" in text:
-        return
-        
     # Ignore predefined menu buttons
     if text in ["📥 Download Media", "🔄 Convert Media", "ℹ️ Help"]:
         return

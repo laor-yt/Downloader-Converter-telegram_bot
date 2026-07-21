@@ -42,52 +42,63 @@ async def handle_menu(client, message):
     elif text == "🔄 Convert Media":
         await message.reply_text("To convert media, simply send me the file (video or image). I will reply with format options!")
 
-@Client.on_message(filters.text & ~filters.command(["start", "help"]))
-async def handle_text(client, message):
-    text = message.text
-    if text and is_url(text):
-        short_id = str(uuid.uuid4())[:8]
-        url_cache[short_id] = text
+@Client.on_message(filters.command("download"))
+async def download_command(client, message):
+    if len(message.command) < 2:
+        await message.reply_text("Please provide a link! Example: `/download https://youtube.com/...`")
+        return
         
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("Download Video", callback_data=f"dl_vid|{short_id}"),
-                InlineKeyboardButton("Download Audio", callback_data=f"dl_aud|{short_id}")
-            ]
-        ])
-        await message.reply_text("Link detected. What would you like to do?", reply_markup=keyboard)
-        raise ContinuePropagation
-    else:
-        # Let other handlers (like AI) process non-url text
-        raise ContinuePropagation
+    url = message.text.split(None, 1)[1]
+    if not is_url(url):
+        await message.reply_text("That doesn't look like a valid URL.")
+        return
+        
+    short_id = str(uuid.uuid4())[:8]
+    url_cache[short_id] = url
+    
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Download Video", callback_data=f"dl_vid|{short_id}"),
+            InlineKeyboardButton("Download Audio", callback_data=f"dl_aud|{short_id}")
+        ]
+    ])
+    await message.reply_text("Link detected. What would you like to do?", reply_markup=keyboard)
 
-@Client.on_message(filters.photo | filters.video | filters.audio | filters.voice | filters.document)
-async def handle_media(client, message):
+@Client.on_message(filters.command("convert"))
+async def handle_convert_command(client, message):
+    target_msg = message
+    if not (message.photo or message.video or message.audio or message.voice or message.document):
+        if message.reply_to_message and (message.reply_to_message.photo or message.reply_to_message.video or message.reply_to_message.audio or message.reply_to_message.voice or message.reply_to_message.document):
+            target_msg = message.reply_to_message
+        else:
+            await message.reply_text("Please attach a file and use /convert as the caption, or reply to a file with /convert")
+            return
+
     file_id = None
     file_name = ""
     mime_type = ""
     
-    if message.photo:
-        file_id = message.photo.file_id
+    if target_msg.photo:
+        file_id = target_msg.photo.file_id
         file_name = "image.jpg"
         mime_type = "image/jpeg"
-    elif message.video:
-        file_id = message.video.file_id
-        file_name = message.video.file_name or "video.mp4"
-        mime_type = message.video.mime_type or "video/mp4"
-    elif message.audio or message.voice:
-        audio = message.audio or message.voice
+    elif target_msg.video:
+        file_id = target_msg.video.file_id
+        file_name = target_msg.video.file_name or "video.mp4"
+        mime_type = target_msg.video.mime_type or "video/mp4"
+    elif target_msg.audio or target_msg.voice:
+        audio = target_msg.audio or target_msg.voice
         file_id = audio.file_id
         file_name = getattr(audio, 'file_name', "audio.mp3")
         mime_type = getattr(audio, 'mime_type', "audio/mpeg")
-    elif message.document:
-        file_id = message.document.file_id
-        file_name = message.document.file_name or "document"
-        mime_type = message.document.mime_type or ""
+    elif target_msg.document:
+        file_id = target_msg.document.file_id
+        file_name = target_msg.document.file_name or "document"
+        mime_type = target_msg.document.mime_type or ""
 
     if file_id:
         short_id = str(uuid.uuid4())[:8]
-        url_cache[short_id] = message # Store full message object for downloading
+        url_cache[short_id] = target_msg # Store full message object for downloading
         
         if mime_type.startswith('image/'):
             keyboard = InlineKeyboardMarkup([
