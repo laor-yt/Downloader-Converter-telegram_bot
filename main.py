@@ -11,6 +11,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), DummyHandler)
+    server.serve_forever()
+
 def main():
     """Start the bot."""
     load_dotenv()
@@ -35,6 +50,9 @@ def main():
     
     # on callback query
     application.add_handler(CallbackQueryHandler(button_callback))
+
+    # Start dummy web server to keep Render Web Service happy
+    threading.Thread(target=run_dummy_server, daemon=True).start()
 
     # Run the bot until the user presses Ctrl-C
     logger.info("Bot started...")
