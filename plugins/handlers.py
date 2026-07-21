@@ -64,15 +64,9 @@ async def download_command(client, message):
     ])
     await message.reply_text("Link detected. What would you like to do?", reply_markup=keyboard)
 
-@Client.on_message(filters.command("convert"))
-async def handle_convert_command(client, message):
+@Client.on_message(filters.photo | filters.video | filters.audio | filters.voice | filters.document)
+async def handle_media(client, message):
     target_msg = message
-    if not (message.photo or message.video or message.audio or message.voice or message.document):
-        if message.reply_to_message and (message.reply_to_message.photo or message.reply_to_message.video or message.reply_to_message.audio or message.reply_to_message.voice or message.reply_to_message.document):
-            target_msg = message.reply_to_message
-        else:
-            await message.reply_text("Please attach a file and use /convert as the caption, or reply to a file with /convert")
-            return
 
     file_id = None
     file_name = ""
