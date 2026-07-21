@@ -30,11 +30,20 @@ def download_media(url, is_audio=False, progress_callback=None):
         'no_warnings': True,
         'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
         'progress_hooks': [yt_dlp_hook] if progress_callback else [],
+        # Bypass YouTube bot detection on cloud/datacenter IPs
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web'],
+            }
+        },
     }
     
+    # Telegram bot file size limit is 50MB
+    MAX_SIZE_BYTES = 49 * 1024 * 1024  # 49MB to be safe
+
     if is_audio:
         ydl_opts.update({
-            'format': 'bestaudio/best',
+            'format': 'bestaudio[filesize<49M]/bestaudio/best',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -43,7 +52,7 @@ def download_media(url, is_audio=False, progress_callback=None):
         })
     else:
         ydl_opts.update({
-            'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
+            'format': 'bestvideo[height<=480][filesize<40M]+bestaudio/best[height<=480][filesize<49M]/best[height<=360]',
             'merge_output_format': 'mp4',
         })
         
@@ -55,9 +64,21 @@ def download_media(url, is_audio=False, progress_callback=None):
                 if f.startswith(file_id) and not f.endswith('.part') and not f.endswith('.ytdl'):
                     downloaded_file = os.path.join(temp_dir, f)
                     break
+            
+            # Check file size before returning
+            if downloaded_file and os.path.exists(downloaded_file):
+                file_size = os.path.getsize(downloaded_file)
+                if file_size > MAX_SIZE_BYTES:
+                    os.remove(downloaded_file)
+                    print(f"File too large: {file_size / 1024 / 1024:.1f}MB, limit is 49MB")
+                    return 'TOO_LARGE'
+            
             return downloaded_file
     except Exception as e:
+        error_str = str(e)
         print(f"Error downloading with yt-dlp: {e}")
+        if 'Sign in to confirm' in error_str or 'bot' in error_str.lower():
+            return 'BOT_DETECTED'
         return None
 
 def download_direct_file(url):

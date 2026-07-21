@@ -176,7 +176,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Download error: {e}")
             filepath = None
         
-        if filepath and os.path.exists(filepath):
+        if filepath == 'TOO_LARGE':
+            try:
+                await query.edit_message_text(text="❌ File is too large to send via Telegram (max 49MB). Try downloading audio only instead.")
+            except Exception:
+                pass
+        elif filepath == 'BOT_DETECTED':
+            try:
+                await query.edit_message_text(text="❌ YouTube is blocking downloads from this server. This is a known issue with cloud hosting. Try running the bot locally for YouTube downloads.")
+            except Exception:
+                pass
+        elif filepath and os.path.exists(filepath):
             try:
                 await query.edit_message_text(text="Download complete! Uploading...")
             except Exception:
@@ -188,12 +198,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await context.bot.send_video(chat_id=query.message.chat_id, video=f, supports_streaming=True)
             cleanup_file(filepath)
             try:
-                await query.edit_message_text(text="Done!")
+                await query.edit_message_text(text="Done! ✅")
             except Exception:
                 pass
         else:
             try:
-                await query.edit_message_text(text="Failed to download the media.")
+                await query.edit_message_text(text="❌ Failed to download the media. The link may be unsupported or geo-restricted.")
             except Exception:
                 pass
             
