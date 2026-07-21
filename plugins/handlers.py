@@ -2,7 +2,7 @@ import os
 import uuid
 import time
 import asyncio
-from pyrogram import Client, filters
+from pyrogram import Client, filters, ContinuePropagation
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup
 from pyrogram.errors import MessageNotModified
 from downloader import download_media
@@ -53,8 +53,10 @@ async def handle_text(client, message):
             ]
         ])
         await message.reply_text("Link detected. What would you like to do?", reply_markup=keyboard)
+        raise ContinuePropagation
     else:
-        await message.reply_text("Please send a valid link or a media file.")
+        # Let other handlers (like AI) process non-url text
+        raise ContinuePropagation
 
 @Client.on_message(filters.photo | filters.video | filters.audio | filters.voice | filters.document)
 async def handle_media(client, message):
