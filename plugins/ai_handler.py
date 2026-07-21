@@ -14,8 +14,6 @@ https://image.pollinations.ai/prompt/{description_with_underscores},_photorealis
 Replace {description_with_underscores} with the requested image description."""
 
 async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):
-    client = AsyncClient()
-    
     # Initialize history for chat if not exists
     if chat_id not in chat_history:
         chat_history[chat_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -36,30 +34,45 @@ async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):
         chat_history[chat_id] = [chat_history[chat_id][0]] + chat_history[chat_id][-10:]
         
     try:
-        response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=chat_history[chat_id]
-        )
-        reply = response.choices[0].message.content
+        import requests
+        def fetch_pollinations():
+            headers = {'Content-Type': 'application/json'}
+            data = {'messages': chat_history[chat_id], 'model': 'openai'}
+            response = requests.post('https://text.pollinations.ai/', headers=headers, json=data, timeout=30)
+            response.raise_for_status()
+            return response.text
+            
+        reply = await asyncio.to_thread(fetch_pollinations)
         
         # Add AI reply to history
         chat_history[chat_id].append({"role": "assistant", "content": reply})
         return reply
     except Exception as e:
-        print(f"AI Error with gpt-4o: {e}")
+        print(f"Pollinations Error: {e}")
+        # Fallback to g4f
         try:
+            client = AsyncClient()
             response = await client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o",
                 messages=chat_history[chat_id]
             )
             reply = response.choices[0].message.content
             chat_history[chat_id].append({"role": "assistant", "content": reply})
             return reply
         except Exception as e2:
-            print(f"AI Error with gpt-3.5-turbo: {e2}")
-            # Remove the failed user prompt from history
-            chat_history[chat_id].pop()
-            return f"Sorry, I am having trouble thinking right now. Error: {str(e2)}"
+            print(f"AI Error with gpt-4o: {e2}")
+            try:
+                response = await client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=chat_history[chat_id]
+                )
+                reply = response.choices[0].message.content
+                chat_history[chat_id].append({"role": "assistant", "content": reply})
+                return reply
+            except Exception as e3:
+                print(f"AI Error with gpt-3.5-turbo: {e3}")
+                chat_history[chat_id].pop()
+                return f"Sorry, I am having trouble thinking right now. Error: {str(e3)}"
 
 @Client.on_message(filters.command("ask"), group=1)
 async def ask_command(client: Client, message: Message):
