@@ -37,7 +37,7 @@ async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):
         
     try:
         response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=chat_history[chat_id]
         )
         reply = response.choices[0].message.content
@@ -46,10 +46,20 @@ async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):
         chat_history[chat_id].append({"role": "assistant", "content": reply})
         return reply
     except Exception as e:
-        print(f"AI Error: {e}")
-        # Remove the failed user prompt from history
-        chat_history[chat_id].pop()
-        return "Sorry, I am having trouble thinking right now. Please try again later!"
+        print(f"AI Error with gpt-4o: {e}")
+        try:
+            response = await client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=chat_history[chat_id]
+            )
+            reply = response.choices[0].message.content
+            chat_history[chat_id].append({"role": "assistant", "content": reply})
+            return reply
+        except Exception as e2:
+            print(f"AI Error with gpt-3.5-turbo: {e2}")
+            # Remove the failed user prompt from history
+            chat_history[chat_id].pop()
+            return f"Sorry, I am having trouble thinking right now. Error: {str(e2)}"
 
 @Client.on_message(filters.command("ask"), group=1)
 async def ask_command(client: Client, message: Message):
