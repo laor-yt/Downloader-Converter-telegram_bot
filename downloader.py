@@ -33,17 +33,10 @@ def download_media(url, is_audio=False, progress_callback=None):
     }
     
     # Use cookies file if available (helps bypass YouTube bot detection on cloud servers)
-    cookies_path = '/etc/secrets/cookies.txt'
+    cookies_path = 'cookies.txt'
     if os.path.exists(cookies_path):
-        import shutil
-        writable_cookies_path = os.path.join(temp_dir, 'cookies.txt')
-        try:
-            shutil.copyfile(cookies_path, writable_cookies_path)
-            ydl_opts['cookiefile'] = writable_cookies_path
-            print(f"✅ Found cookies file, copied to {writable_cookies_path} and applying to yt-dlp...")
-        except Exception as e:
-            print(f"⚠️ Error copying cookies file: {e}")
-            ydl_opts['cookiefile'] = cookies_path # fallback
+        ydl_opts['cookiefile'] = cookies_path
+        print(f"✅ Found cookies file at {cookies_path} and applying to yt-dlp...")
     else:
         print(f"⚠️ No cookies file found at {cookies_path}. YouTube might block downloads.")
     
