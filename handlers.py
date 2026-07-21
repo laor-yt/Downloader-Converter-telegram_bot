@@ -196,16 +196,29 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(text="Download complete! Uploading...")
             except Exception:
                 pass
-            with open(filepath, 'rb') as f:
-                if is_audio:
-                    await context.bot.send_audio(chat_id=query.message.chat_id, audio=f)
-                else:
-                    await context.bot.send_video(chat_id=query.message.chat_id, video=f, supports_streaming=True)
-            cleanup_file(filepath)
+            
             try:
-                await query.edit_message_text(text="Done! ✅")
-            except Exception:
-                pass
+                with open(filepath, 'rb') as f:
+                    if is_audio:
+                        await context.bot.send_audio(chat_id=query.message.chat_id, audio=f)
+                    else:
+                        await context.bot.send_video(chat_id=query.message.chat_id, video=f, supports_streaming=True)
+                try:
+                    await query.edit_message_text(text="Done! ✅")
+                except Exception:
+                    pass
+            except Exception as e:
+                error_str = str(e)
+                print(f"Upload failed: {error_str}")
+                try:
+                    if "File too large" in error_str or "Entity too large" in error_str:
+                        await query.edit_message_text(text="❌ Upload failed: File is larger than Telegram's 50MB bot limit.")
+                    else:
+                        await query.edit_message_text(text=f"❌ Upload failed: {error_str}")
+                except Exception:
+                    pass
+            finally:
+                cleanup_file(filepath)
         else:
             try:
                 await query.edit_message_text(text="❌ Failed to download the media. The link may be unsupported or geo-restricted.")

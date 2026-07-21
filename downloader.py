@@ -30,13 +30,6 @@ def download_media(url, is_audio=False, progress_callback=None):
         'no_warnings': True,
         'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
         'progress_hooks': [yt_dlp_hook] if progress_callback else [],
-        # Try mobile clients only to bypass YouTube bot detection on cloud IPs
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['ios', 'android'],
-                'player_skip': ['webpage'],
-            }
-        },
     }
     
     # Use cookies file if available (helps bypass YouTube bot detection on cloud servers)
