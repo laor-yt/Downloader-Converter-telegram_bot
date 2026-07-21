@@ -1,4 +1,5 @@
-python-telegram-bot>=20.0
+pyrogram
+tgcrypto
 yt-dlp
 Pillow>=10.0.0
 requests>=2.31.0

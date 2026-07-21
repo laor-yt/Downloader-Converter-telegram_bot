@@ -1,8 +1,9 @@
 import os
 import logging
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from dotenv import load_dotenv
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
-from handlers import start_command, handle_message, button_callback
+from pyrogram import Client
 from utils import get_temp_dir
 
 # Enable logging
@@ -10,9 +11,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -29,35 +27,35 @@ def run_dummy_server():
 def main():
     """Start the bot."""
     load_dotenv()
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    api_id = os.environ.get("API_ID")
+    api_hash = os.environ.get("API_HASH")
     
     if not token or token == "your_bot_token_here":
         logger.error("No valid Telegram Bot Token found. Please update .env")
+        return
+        
+    if not api_id or not api_hash:
+        logger.error("API_ID and API_HASH are required for Pyrogram. Please add them to your environment variables.")
         return
 
     # Ensure temp dir exists
     get_temp_dir()
 
-    # Create the Application and pass it your bot's token.
-    application = Application.builder().token(token).concurrent_updates(True).build()
-
-    # on different commands - answer in Telegram
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", start_command))
-
-    # on non command i.e message - echo the message on Telegram
-    application.add_handler(MessageHandler(filters.TEXT | filters.Document.ALL | filters.VIDEO | filters.PHOTO | filters.AUDIO | filters.VOICE, handle_message))
-    
-    # on callback query
-    application.add_handler(CallbackQueryHandler(button_callback))
-
     # Start dummy web server to keep Render Web Service happy
     threading.Thread(target=run_dummy_server, daemon=True).start()
 
-    # Run the bot until the user presses Ctrl-C
     logger.info("Bot started...")
-    from telegram import Update
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    
+    app = Client(
+        "my_bot",
+        bot_token=token,
+        api_id=int(api_id),
+        api_hash=api_hash,
+        plugins=dict(root="plugins")
+    )
+    
+    app.run()
 
 if __name__ == "__main__":
     main()
