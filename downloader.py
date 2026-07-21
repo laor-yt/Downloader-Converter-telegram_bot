@@ -31,7 +31,7 @@ def download_media(url, is_audio=False, progress_callback=None):
         'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
         'progress_hooks': [yt_dlp_hook] if progress_callback else [],
         'js_runtimes': {'nodejs': {}, 'node': {}},
-        'extractor_args': {'youtube': {'player_client': ['android_vr', 'web']}},
+        'extractor_args': {'youtube': {'player_client': ['android_vr']}},
     }
     
     # Use cookies file if available (helps bypass YouTube bot detection on cloud servers)
