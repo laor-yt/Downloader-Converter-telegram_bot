@@ -16,3 +16,4 @@ openpyxl
 python-pptx
 SpeechRecognition
 pydub
+pytubefix

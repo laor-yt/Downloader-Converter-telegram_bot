@@ -91,8 +91,30 @@ def download_media(url, is_audio=False, progress_callback=None):
     except Exception as e:
         error_str = str(e)
         print(f"Error downloading with yt-dlp: {e}")
-        if 'Sign in to confirm' in error_str or 'bot' in error_str.lower():
-            return 'BOT_DETECTED'
+        
+        # Fallback to pytubefix if YouTube blocked the cloud IP
+        if 'Sign in to confirm' in error_str or 'bot' in error_str.lower() or 'Requested format is not available' in error_str:
+            print("YouTube blocked yt-dlp. Attempting fallback with pytubefix...")
+            try:
+                from pytubefix import YouTube
+                yt = YouTube(url)
+                temp_dir = get_temp_dir()
+                if is_audio:
+                    ys = yt.streams.get_audio_only()
+                    out_file = ys.download(output_path=temp_dir)
+                    # Convert to mp3
+                    base, ext = os.path.splitext(out_file)
+                    new_file = base + '.mp3'
+                    os.rename(out_file, new_file)
+                    return new_file
+                else:
+                    ys = yt.streams.get_highest_resolution()
+                    out_file = ys.download(output_path=temp_dir)
+                    return out_file
+            except Exception as pytube_e:
+                print(f"pytubefix fallback failed: {pytube_e}")
+                return 'BOT_DETECTED'
+                
         return f"ERROR: {error_str}"
 
 def download_direct_file(url):
