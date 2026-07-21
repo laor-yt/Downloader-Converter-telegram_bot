@@ -270,6 +270,7 @@ async def button_callback(client, callback_query):
                 
             # Prepare prompt
             prompt = original_msg.caption if original_msg.caption else "Analyze this image and its text in detail."
+            
             prompt += extracted_text
             
             # Get AI response
