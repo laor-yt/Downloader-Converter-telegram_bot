@@ -17,19 +17,71 @@ url_cache = {}
 def is_url(text):
     return "http://" in text or "https://" in text
 
-@Client.on_message(filters.command(["start", "help"]) | filters.regex("^(ℹ️ Help)$"))
+@Client.on_message(filters.command(["start"]) | filters.regex("^(ℹ️ Help)$"))
 async def start_command(client, message):
     welcome_message = (
-        "Welcome to the Media Downloader and Converter Bot!\n\n"
-        "To see all available commands, type `/` or tap the Menu button.\n\n"
-        "Here are a few things I can do:\n"
-        "• Send me a link and type `/download` to download video/audio.\n"
-        "• Send me a video or image file to convert it.\n"
-        "• Just chat with me, ask questions, or tell me to draw an image!"
+        "👋 Welcome to the **Media Downloader and Converter Bot**!\n\n"
+        "To see all available commands, tap the Menu button or use the buttons below."
     )
     
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛠 Commands (Help)", callback_data="show_help")],
+        [InlineKeyboardButton("ℹ️ About", callback_data="show_about")]
+    ])
+    
     from pyrogram.types import ReplyKeyboardRemove
-    await message.reply_text(welcome_message, reply_markup=ReplyKeyboardRemove())
+    # Send welcome with inline keyboard, and remove any leftover reply keyboard
+    await message.reply_text(welcome_message, reply_markup=keyboard)
+    # Also send an invisible remove keyboard message just in case and delete it
+    msg = await message.reply_text("Keyboard hidden.", reply_markup=ReplyKeyboardRemove(), disable_notification=True)
+    await msg.delete()
+    
+@Client.on_message(filters.command(["help"]))
+async def help_command(client, message):
+    help_text = (
+        "**Available Commands:**\n\n"
+        "📥 `/download <link>` - Download video/audio from YouTube, TikTok, etc.\n"
+        "🔄 `/convert` - Reply to or attach a media file to convert it.\n"
+        "💬 `/ask <question>` - Ask the AI a question.\n"
+        "🎨 `/image <prompt>` - Generate an image with AI.\n"
+        "🔍 `/search <query>` - Search the web with AI."
+    )
+    await message.reply_text(help_text)
+
+@Client.on_callback_query(filters.regex("^(show_help|show_about)$"))
+async def handle_start_menu(client, query):
+    if query.data == "show_help":
+        help_text = (
+            "**Available Commands:**\n\n"
+            "📥 `/download <link>` - Download video/audio from YouTube, TikTok, etc.\n"
+            "🔄 `/convert` - Reply to or attach a media file to convert it.\n"
+            "💬 `/ask <question>` - Ask the AI a question.\n"
+            "🎨 `/image <prompt>` - Generate an image with AI.\n"
+            "🔍 `/search <query>` - Search the web with AI."
+        )
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="start_menu")]])
+        await query.message.edit_text(help_text, reply_markup=keyboard)
+        
+    elif query.data == "show_about":
+        about_text = (
+            "**About This Bot**\n\n"
+            "This bot is a versatile tool for downloading, converting, and interacting with AI.\n\n"
+            "Developed to provide completely free, unlimited AI features, media conversion, and YouTube downloading directly within Telegram."
+        )
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="start_menu")]])
+        await query.message.edit_text(about_text, reply_markup=keyboard)
+
+@Client.on_callback_query(filters.regex("^start_menu$"))
+async def handle_back_to_start(client, query):
+    welcome_message = (
+        "👋 Welcome to the **Media Downloader and Converter Bot**!\n\n"
+        "To see all available commands, tap the Menu button or use the buttons below."
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛠 Commands (Help)", callback_data="show_help")],
+        [InlineKeyboardButton("ℹ️ About", callback_data="show_about")]
+    ])
+    await query.message.edit_text(welcome_message, reply_markup=keyboard)
 
 @Client.on_message(filters.regex("^(📥 Download Media|🔄 Convert Media)$"))
 async def handle_menu(client, message):
