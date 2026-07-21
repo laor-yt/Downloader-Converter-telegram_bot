@@ -76,7 +76,13 @@ def transcribe_audio_video(file_path: str) -> str:
         recognizer = sr.Recognizer()
         with sr.AudioFile(temp_wav) as source:
             audio_data = recognizer.record(source)
-            text = recognizer.recognize_google(audio_data)
+            try:
+                # Try Khmer first
+                text = recognizer.recognize_google(audio_data, language="km-KH")
+            except sr.UnknownValueError:
+                # Fallback to English if Khmer transcription completely fails
+                text = recognizer.recognize_google(audio_data, language="en-US")
+                
             return text
             
     except sr.UnknownValueError:
