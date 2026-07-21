@@ -292,5 +292,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cleanup_file(input_path)
             
         except Exception as e:
-            print(f"Error in callback: {e}")
-            await query.edit_message_text(text=f"An error occurred: {e}")
+            error_str = str(e)
+            print(f"Error in callback: {error_str}")
+            if "File is too big" in error_str:
+                await query.edit_message_text(text="❌ Telegram bots are strictly limited to downloading files under **20MB** directly from chat. Please send a smaller file, or use a download link instead!")
+            else:
+                await query.edit_message_text(text=f"❌ An error occurred: {error_str}")
