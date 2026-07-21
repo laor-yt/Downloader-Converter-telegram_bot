@@ -42,7 +42,10 @@ def download_media(url, is_audio=False, progress_callback=None):
     # Use cookies file if available (helps bypass YouTube bot detection on cloud servers)
     cookies_path = '/etc/secrets/cookies.txt'
     if os.path.exists(cookies_path):
+        print(f"✅ Found cookies file at {cookies_path}, applying to yt-dlp...")
         ydl_opts['cookiefile'] = cookies_path
+    else:
+        print(f"⚠️ No cookies file found at {cookies_path}. YouTube might block downloads.")
     
     # Telegram bot file size limit is 50MB
     MAX_SIZE_BYTES = 49 * 1024 * 1024  # 49MB to be safe
