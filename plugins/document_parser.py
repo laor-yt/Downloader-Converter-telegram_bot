@@ -5,7 +5,11 @@ import pandas as pd
 from pptx import Presentation
 import speech_recognition as sr
 from pydub import AudioSegment
+import imageio_ffmpeg
 import uuid
+
+# Configure pydub to use the ffmpeg binary from imageio_ffmpeg
+AudioSegment.converter = imageio_ffmpeg.get_ffmpeg_exe()
 
 # Maximum number of characters to extract to prevent AI context overflow
 MAX_CHARS = 12000
