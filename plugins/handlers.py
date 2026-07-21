@@ -9,6 +9,7 @@ from downloader import download_media
 from converter import convert_video_to_audio, convert_video_format, convert_image_format
 from utils import cleanup_file
 from plugins.ai_handler import get_ai_response
+from plugins.document_parser import parse_document, transcribe_audio_video
 import requests
 
 url_cache = {}
@@ -98,6 +99,7 @@ async def handle_media(client, message):
             await message.reply_text(f"Image received: {file_name}. Choose an action:", reply_markup=keyboard)
         elif mime_type.startswith('video/'):
             keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("💬 Analyze Audio with AI", callback_data=f"ask_doc|{short_id}")],
                 [InlineKeyboardButton("Convert to MP3", callback_data=f"conv_aud|{short_id}")],
                 [InlineKeyboardButton("Convert to MP4", callback_data=f"conv_vid|{short_id}|mp4")],
                 [InlineKeyboardButton("Convert to MKV", callback_data=f"conv_vid|{short_id}|mkv")],
@@ -105,9 +107,15 @@ async def handle_media(client, message):
             await message.reply_text(f"Video received: {file_name}. Choose an action:", reply_markup=keyboard)
         elif mime_type.startswith('audio/'):
             keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("💬 Analyze with AI", callback_data=f"ask_doc|{short_id}")],
                 [InlineKeyboardButton("Convert to MP3", callback_data=f"conv_aud|{short_id}")]
             ])
             await message.reply_text(f"Audio received: {file_name}. Choose an action:", reply_markup=keyboard)
+        elif mime_type.startswith('application/pdf') or 'word' in mime_type or 'excel' in mime_type or 'spreadsheet' in mime_type or 'powerpoint' in mime_type or 'presentation' in mime_type or file_name.lower().endswith(('.pdf', '.docx', '.xlsx', '.pptx', '.csv', '.doc', '.xls', '.ppt')):
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("💬 Analyze with AI", callback_data=f"ask_doc|{short_id}")]
+            ])
+            await message.reply_text(f"Document received: {file_name}. Choose an action:", reply_markup=keyboard)
         else:
             await message.reply_text(f"Received unsupported file type: {mime_type or 'Unknown'}")
 
@@ -196,6 +204,57 @@ async def button_callback(client, callback_query):
         except Exception as e:
             print(f"Error in ask_ai: {e}")
             await safe_edit_text(query_msg, "Failed to process image with AI.")
+            
+    elif data.startswith("ask_doc|"):
+        _, short_id = data.split("|")
+        original_msg = url_cache.get(short_id)
+        
+        if not original_msg:
+            await query_msg.answer("Session expired. Please send the file again.", show_alert=True)
+            return
+            
+        await safe_edit_text(query_msg, "⏳ Downloading and analyzing file...")
+        
+        try:
+            file_path = await client.download_media(original_msg)
+            
+            # Determine file type
+            is_media = False
+            mime_type = ""
+            if original_msg.video:
+                is_media = True
+                mime_type = original_msg.video.mime_type
+            elif original_msg.audio or original_msg.voice:
+                is_media = True
+                mime_type = "audio"
+            elif original_msg.document:
+                mime_type = original_msg.document.mime_type
+                
+            text = ""
+            if is_media:
+                await safe_edit_text(query_msg, "⏳ Transcribing audio (this may take a minute)...")
+                text = transcribe_audio_video(file_path)
+            else:
+                text = parse_document(file_path, str(mime_type))
+                
+            cleanup_file(file_path)
+            
+            if "Error" in text or "Unsupported" in text or not text.strip():
+                await safe_edit_text(query_msg, f"❌ Failed to extract content: {text}")
+                return
+                
+            await safe_edit_text(query_msg, "🤔 Asking AI...")
+            
+            prompt = "Please summarize and analyze the following document/transcript:\n\n" + text
+            if original_msg.caption:
+                prompt = f"User instruction: {original_msg.caption}\n\nDocument/Transcript:\n{text}"
+                
+            reply = await get_ai_response(query_msg.chat.id, prompt)
+            await safe_edit_text(query_msg, reply)
+            
+        except Exception as e:
+            print(f"Error in ask_doc: {e}")
+            await safe_edit_text(query_msg, "❌ Failed to analyze document with AI.")
             
     elif data.startswith("dl_"):
         action, short_id = data.split('|', 1)
