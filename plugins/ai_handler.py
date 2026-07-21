@@ -92,7 +92,8 @@ async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):
 @Client.on_message(filters.command("ask"), group=1)
 async def ask_command(client: Client, message: Message):
     if len(message.command) < 2:
-        await message.reply_text("Please ask a question! Example: `/ask What is the capital of France?`")
+        from pyrogram.types import ForceReply
+        await message.reply_text("Please type your question below:", reply_markup=ForceReply(selective=True))
         return
         
     prompt = message.text.split(None, 1)[1]
@@ -109,7 +110,8 @@ async def ask_command(client: Client, message: Message):
 @Client.on_message(filters.command("image"), group=1)
 async def image_command(client: Client, message: Message):
     if len(message.command) < 2:
-        await message.reply_text("Please provide a description! Example: `/image a cute cat playing piano`")
+        from pyrogram.types import ForceReply
+        await message.reply_text("Please describe the image you want me to draw below:", reply_markup=ForceReply(selective=True))
         return
         
     prompt = message.text.split(None, 1)[1]
@@ -126,7 +128,8 @@ async def image_command(client: Client, message: Message):
 @Client.on_message(filters.command("search"), group=1)
 async def search_command(client: Client, message: Message):
     if len(message.command) < 2:
-        await message.reply_text("Please provide a search query! Example: `/search weather in Tokyo today`")
+        from pyrogram.types import ForceReply
+        await message.reply_text("Please type your search query below:", reply_markup=ForceReply(selective=True))
         return
         
     query = message.text.split(None, 1)[1]

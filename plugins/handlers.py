@@ -94,7 +94,8 @@ async def handle_menu(client, message):
 @Client.on_message(filters.command("download"))
 async def download_command(client, message):
     if len(message.command) < 2:
-        await message.reply_text("Please provide a link! Example: `/download https://youtube.com/...`")
+        from pyrogram.types import ForceReply
+        await message.reply_text("Please paste the link you want to download below:", reply_markup=ForceReply(selective=True))
         return
         
     url = message.text.split(None, 1)[1]
@@ -112,6 +113,11 @@ async def download_command(client, message):
         ]
     ])
     await message.reply_text("Link detected. What would you like to do?", reply_markup=keyboard)
+
+@Client.on_message(filters.command("convert"))
+async def convert_command(client, message):
+    from pyrogram.types import ForceReply
+    await message.reply_text("Please send the video or image file you want to convert below:", reply_markup=ForceReply(selective=True))
 
 @Client.on_message(filters.photo | filters.video | filters.audio | filters.voice | filters.document)
 async def handle_media(client, message):
