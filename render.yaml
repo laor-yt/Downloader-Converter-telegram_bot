@@ -1,0 +1,8 @@
+services:
+  - type: worker
+    name: Downloader-Converter-telegram_bot
+    runtime: docker
+    branch: main
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
