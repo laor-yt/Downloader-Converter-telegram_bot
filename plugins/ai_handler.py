@@ -7,7 +7,7 @@ from g4f.client import AsyncClient
 # Store recent conversation history per chat for context
 chat_history = {}
 
-async def get_ai_response(chat_id, user_prompt):
+async def get_ai_response(chat_id, user_prompt, image_url=None):
     client = AsyncClient()
     
     # Initialize history for chat if not exists
@@ -15,7 +15,11 @@ async def get_ai_response(chat_id, user_prompt):
         chat_history[chat_id] = [{"role": "system", "content": "You are a helpful, friendly AI assistant integrated into a Telegram bot."}]
     
     # Add user message to history
-    chat_history[chat_id].append({"role": "user", "content": user_prompt})
+    if image_url:
+        message_content = f"{user_prompt}\n\nImage URL: {image_url}"
+        chat_history[chat_id].append({"role": "user", "content": message_content})
+    else:
+        chat_history[chat_id].append({"role": "user", "content": user_prompt})
     
     # Keep only the last 10 messages to avoid huge context limits
     if len(chat_history[chat_id]) > 11:

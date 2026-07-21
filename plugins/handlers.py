@@ -8,6 +8,8 @@ from pyrogram.errors import MessageNotModified
 from downloader import download_media
 from converter import convert_video_to_audio, convert_video_format, convert_image_format
 from utils import cleanup_file
+from plugins.ai_handler import get_ai_response
+import requests
 
 url_cache = {}
 
@@ -88,6 +90,7 @@ async def handle_media(client, message):
         
         if mime_type.startswith('image/'):
             keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("💬 Ask AI about Image", callback_data=f"ask_ai|{short_id}")],
                 [InlineKeyboardButton("Convert to PNG", callback_data=f"conv_img|{short_id}|png")],
                 [InlineKeyboardButton("Convert to JPG", callback_data=f"conv_img|{short_id}|jpg")],
                 [InlineKeyboardButton("Convert to WEBP", callback_data=f"conv_img|{short_id}|webp")],
@@ -156,6 +159,44 @@ async def button_callback(client, callback_query):
             pass
         await client.send_message(query_msg.chat.id, welcome_message, reply_markup=keyboard)
         
+    elif data.startswith("ask_ai|"):
+        _, short_id = data.split("|")
+        original_msg = url_cache.get(short_id)
+        
+        if not original_msg:
+            await query_msg.answer("Session expired. Please send the image again.", show_alert=True)
+            return
+            
+        await safe_edit_text(query_msg, "🤔 Processing image...")
+        
+        try:
+            # Download the image
+            file_path = await client.download_media(original_msg)
+            
+            # Upload to catbox.moe
+            with open(file_path, "rb") as f:
+                response = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": (os.path.basename(file_path), f)})
+                
+            image_url = response.text.strip()
+            
+            # Clean up local file
+            cleanup_file(file_path)
+            
+            if not image_url.startswith("http"):
+                await safe_edit_text(query_msg, "Failed to upload image for analysis.")
+                return
+                
+            # Prepare prompt
+            prompt = original_msg.caption if original_msg.caption else "Describe this image in detail."
+            
+            # Get AI response
+            reply = await get_ai_response(query_msg.chat.id, prompt, image_url=image_url)
+            
+            await safe_edit_text(query_msg, reply)
+        except Exception as e:
+            print(f"Error in ask_ai: {e}")
+            await safe_edit_text(query_msg, "Failed to process image with AI.")
+            
     elif data.startswith("dl_"):
         action, short_id = data.split('|', 1)
         url = url_cache.get(short_id)
