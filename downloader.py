@@ -30,13 +30,19 @@ def download_media(url, is_audio=False, progress_callback=None):
         'no_warnings': True,
         'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
         'progress_hooks': [yt_dlp_hook] if progress_callback else [],
-        # Bypass YouTube bot detection on cloud/datacenter IPs
+        # Try multiple player clients to bypass YouTube bot detection on cloud IPs
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web'],
+                'player_client': ['android_vr', 'android', 'mweb', 'web'],
+                'player_skip': ['webpage'],
             }
         },
     }
+    
+    # Use cookies file if available (helps bypass YouTube bot detection on cloud servers)
+    cookies_path = '/etc/secrets/cookies.txt'
+    if os.path.exists(cookies_path):
+        ydl_opts['cookiefile'] = cookies_path
     
     # Telegram bot file size limit is 50MB
     MAX_SIZE_BYTES = 49 * 1024 * 1024  # 49MB to be safe
