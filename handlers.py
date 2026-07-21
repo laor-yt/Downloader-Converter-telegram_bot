@@ -186,6 +186,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(text="❌ YouTube is blocking downloads from this server. This is a known issue with cloud hosting. Try running the bot locally for YouTube downloads.")
             except Exception:
                 pass
+        elif isinstance(filepath, str) and filepath.startswith('ERROR:'):
+            try:
+                await query.edit_message_text(text=f"❌ {filepath}")
+            except Exception:
+                pass
         elif filepath and os.path.exists(filepath):
             try:
                 await query.edit_message_text(text="Download complete! Uploading...")

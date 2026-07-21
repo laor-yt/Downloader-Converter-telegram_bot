@@ -88,7 +88,7 @@ def download_media(url, is_audio=False, progress_callback=None):
         print(f"Error downloading with yt-dlp: {e}")
         if 'Sign in to confirm' in error_str or 'bot' in error_str.lower():
             return 'BOT_DETECTED'
-        return None
+        return f"ERROR: {error_str}"
 
 def download_direct_file(url):
     """
