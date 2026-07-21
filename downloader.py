@@ -52,7 +52,7 @@ def download_media(url, is_audio=False, progress_callback=None):
 
     if is_audio:
         ydl_opts.update({
-            'format': 'bestaudio[filesize<49M]/bestaudio/best',
+            'format': 'bestaudio/best',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
@@ -61,7 +61,7 @@ def download_media(url, is_audio=False, progress_callback=None):
         })
     else:
         ydl_opts.update({
-            'format': 'bestvideo[height<=480][filesize<40M]+bestaudio/best[height<=480][filesize<49M]/best[height<=360]',
+            'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
             'merge_output_format': 'mp4',
         })
         
