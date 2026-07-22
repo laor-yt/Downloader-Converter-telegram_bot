@@ -236,57 +236,63 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
         return f"ERROR: Failed to generate TTS voice: {e}"
         
     final_audio_track = raw_tts_output
-    if is_video:
-        orig_duration = get_video_duration(input_path)
-        tts_duration = get_video_duration(raw_tts_output)
-        
-        # Keep speed ratio strictly within 0.90x to 1.15x so natural voice pronunciation is preserved
-        if orig_duration > 0 and tts_duration > 0:
-            speed_ratio = tts_duration / orig_duration
-            if 0.85 <= speed_ratio <= 1.20:
-                try:
-                    (
-                        ffmpeg
-                        .input(raw_tts_output)
-                        .filter('atempo', speed_ratio)
-                        .output(synced_tts_output)
-                        .overwrite_output()
-                        .run(capture_stdout=True, capture_stderr=True)
-                    )
-                    if os.path.exists(synced_tts_output) and os.path.getsize(synced_tts_output) > 0:
-                        final_audio_track = synced_tts_output
-                except Exception as e_tempo:
-                    print(f"Atempo Sync Error: {e_tempo}")
 
     if progress_callback: progress_callback("🎬 Merging translated vocal audio with video...")
     output_ext = "mp4" if is_video else "mp3"
     output_path = os.path.join(temp_dir, f"{uuid.uuid4()}_dubbed.{output_ext}")
-    
+
     if is_video:
         try:
             orig_dur = get_video_duration(input_path)
-            tts_dur = get_video_duration(final_audio_track)
+            tts_dur  = get_video_duration(final_audio_track)
+            print(f"[Dub] orig_dur={orig_dur:.2f}s  tts_dur={tts_dur:.2f}s")
+
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+            if orig_dur > 0 and tts_dur > 0 and tts_dur < orig_dur:
+                # TTS shorter than video — pad audio with silence to match video length
+                padded_path = os.path.join(temp_dir, f"{uuid.uuid4()}_padded_dub.mp3")
+                try:
+                    import subprocess
+                    subprocess.run(
+                        [ffmpeg_exe, "-y",
+                         "-i", final_audio_track,
+                         "-af", f"apad=whole_dur={orig_dur}",
+                         "-t", str(orig_dur),
+                         padded_path],
+                        capture_output=True, check=True
+                    )
+                    if os.path.exists(padded_path) and os.path.getsize(padded_path) > 0:
+                        final_audio_track = padded_path
+                        tts_dur = orig_dur
+                except Exception as pad_e:
+                    print(f"apad error: {pad_e}")
+
             target_dur = max(orig_dur, tts_dur) if (orig_dur > 0 or tts_dur > 0) else None
-            
-            video_input = ffmpeg.input(input_path, stream_loop=-1).video if (orig_dur > 0 and tts_dur > orig_dur) else ffmpeg.input(input_path).video
-            audio_input = ffmpeg.input(final_audio_track).audio
-            
+
+            # Loop video if TTS is longer than original video
+            if orig_dur > 0 and tts_dur > orig_dur:
+                video_in = ffmpeg.input(input_path, stream_loop=-1).video
+            else:
+                video_in = ffmpeg.input(input_path).video
+
+            audio_in = ffmpeg.input(final_audio_track).audio
             out_opts = {'vcodec': 'copy', 'acodec': 'aac'}
             if target_dur and target_dur > 0:
                 out_opts['t'] = target_dur
-                
-            stream = ffmpeg.output(video_input, audio_input, output_path, **out_opts).overwrite_output()
+
+            stream = ffmpeg.output(video_in, audio_in, output_path, **out_opts).overwrite_output()
             res = _run_ffmpeg_with_progress(stream, output_path, progress_callback)
         except Exception as e:
             print(f"FFmpeg Merge Error: {e}")
             res = None
     else:
         res = final_audio_track
-        
+
     cleanup_file(raw_tts_output)
     if os.path.exists(synced_tts_output) and final_audio_track != synced_tts_output:
         cleanup_file(synced_tts_output)
-        
+
     return res
 
 def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=False, progress_callback=None):
@@ -371,54 +377,62 @@ def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=Fal
         return recap_text, None
         
     final_audio = raw_tts
-    if is_video:
-        orig_dur = get_video_duration(input_path)
-        tts_dur = get_video_duration(raw_tts)
-        if orig_dur > 0 and tts_dur > 0:
-            ratio = tts_dur / orig_dur
-            if 0.85 <= ratio <= 1.20:
-                try:
-                    (
-                        ffmpeg
-                        .input(raw_tts)
-                        .filter('atempo', ratio)
-                        .output(synced_tts)
-                        .overwrite_output()
-                        .run(capture_stdout=True, capture_stderr=True)
-                    )
-                    if os.path.exists(synced_tts) and os.path.getsize(synced_tts) > 0:
-                        final_audio = synced_tts
-                except Exception as e_tempo:
-                    print(f"Recap Tempo Sync Error: {e_tempo}")
-                
+
     output_ext = "mp4" if is_video else "mp3"
     output_path = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_dubbed.{output_ext}")
-    
+
     if is_video:
         try:
             orig_dur = get_video_duration(input_path)
-            tts_dur = get_video_duration(final_audio)
+            tts_dur  = get_video_duration(final_audio)
+            print(f"[Recap] orig_dur={orig_dur:.2f}s  tts_dur={tts_dur:.2f}s")
+
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+            if orig_dur > 0 and tts_dur > 0 and tts_dur < orig_dur:
+                # Recap voice shorter than video — pad with silence to fill full video length
+                padded_path = os.path.join(temp_dir, f"{uuid.uuid4()}_padded_recap.mp3")
+                try:
+                    import subprocess
+                    subprocess.run(
+                        [ffmpeg_exe, "-y",
+                         "-i", final_audio,
+                         "-af", f"apad=whole_dur={orig_dur}",
+                         "-t", str(orig_dur),
+                         padded_path],
+                        capture_output=True, check=True
+                    )
+                    if os.path.exists(padded_path) and os.path.getsize(padded_path) > 0:
+                        final_audio = padded_path
+                        tts_dur = orig_dur
+                except Exception as pad_e:
+                    print(f"Recap apad error: {pad_e}")
+
             target_dur = max(orig_dur, tts_dur) if (orig_dur > 0 or tts_dur > 0) else None
-            
-            video_input = ffmpeg.input(input_path, stream_loop=-1).video if (orig_dur > 0 and tts_dur > orig_dur) else ffmpeg.input(input_path).video
-            audio_input = ffmpeg.input(final_audio).audio
-            
+
+            # Loop video if recap voice is longer than original
+            if orig_dur > 0 and tts_dur > orig_dur:
+                video_in = ffmpeg.input(input_path, stream_loop=-1).video
+            else:
+                video_in = ffmpeg.input(input_path).video
+
+            audio_in = ffmpeg.input(final_audio).audio
             out_opts = {'vcodec': 'copy', 'acodec': 'aac'}
             if target_dur and target_dur > 0:
                 out_opts['t'] = target_dur
-                
-            stream = ffmpeg.output(video_input, audio_input, output_path, **out_opts).overwrite_output()
+
+            stream = ffmpeg.output(video_in, audio_in, output_path, **out_opts).overwrite_output()
             res_media = _run_ffmpeg_with_progress(stream, output_path, progress_callback)
         except Exception as e:
             print(f"FFmpeg Recap Merge Error: {e}")
             res_media = None
     else:
         res_media = final_audio
-        
+
     cleanup_file(raw_tts)
     if os.path.exists(synced_tts) and final_audio != synced_tts:
         cleanup_file(synced_tts)
-        
+
     return recap_text, res_media
 
 def get_video_duration(file_path):
