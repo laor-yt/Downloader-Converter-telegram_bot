@@ -118,7 +118,7 @@ async def _fallback_slideshow(prompt: str, temp_dir: str, progress_callback=None
             p = f"{prompt}, cinematic scene {i+1}, ultra-realistic, 8k, photorealistic"
             encoded = urllib.parse.quote(p)
             url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1280&height=720&nologo=true&seed={i * 999}"
-            resp = await asyncio.to_thread(requests.get, url, timeout=60)
+            resp = await asyncio.to_thread(requests.get, url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
             if resp.status_code == 200 and len(resp.content) > 5000:
                 p_img = os.path.join(temp_dir, f"fb_scene_{i}_{uuid.uuid4().hex}.jpg")
                 with open(p_img, "wb") as f:
@@ -356,7 +356,7 @@ async def audio_to_video(audio_path: str, progress_callback=None) -> str | None:
                 f"https://image.pollinations.ai/prompt/{encoded}"
                 f"?model=flux&width=1920&height=1080&nologo=true&enhance=true&seed={i * 137}"
             )
-            resp = requests.get(img_url, timeout=60)
+            resp = requests.get(img_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
             if resp.status_code == 200 and len(resp.content) > 5000:
                 img_path = os.path.join(temp_dir, f"scene_{i}_{uuid.uuid4().hex}.jpg")
                 with open(img_path, "wb") as f:
