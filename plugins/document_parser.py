@@ -101,7 +101,7 @@ def transcribe_audio_video(file_path: str) -> str:
                         payload = {
                             "contents": [{
                                 "parts": [
-                                    {"text": "Transcribe 100% of ALL spoken words in this audio with exact precision. Do not skip any sentence or word. Output ONLY the raw spoken transcript text."},
+                                    {"text": "You are an expert multilingual audio transcriber. Transcribe 100% of ALL spoken words in this audio in its ORIGINAL spoken language (Khmer, English, Chinese, Vietnamese, Thai, Korean, Japanese, French, Spanish, German, Russian, Arabic, Hindi, etc.) with exact precision. Do not skip any sentence or word. Output ONLY the raw spoken transcript text in the original spoken language script, without any intro/outro text."},
                                     {"inline_data": {"mime_type": "audio/mp3", "data": b64}}
                                 ]
                             }]
@@ -121,7 +121,7 @@ def transcribe_audio_video(file_path: str) -> str:
             except Exception as e:
                 print(f"Gemini Multi-part Audio Transcription Error: {e}")
 
-        # 2. Multi-language Chunked Google SpeechRecognition Fallback (Transcribes up to 3 hours)
+        # 2. Multi-language Chunked Google SpeechRecognition Fallback (Supports All Spoken Languages)
         audio_mono.export(temp_wav, format="wav")
         recognizer = sr.Recognizer()
         
@@ -129,7 +129,14 @@ def transcribe_audio_video(file_path: str) -> str:
         total_length_ms = len(audio_mono)
         full_transcript = []
         
-        # Determine language by testing first 15 seconds
+        # Supported global languages list
+        global_langs = [
+            "km-KH", "en-US", "zh-CN", "vi-VN", "th-TH", "ko-KR", "ja-JP", 
+            "fr-FR", "es-ES", "de-DE", "ru-RU", "id-ID", "hi-IN", "ar-SA", 
+            "pt-PT", "it-IT", "tr-TR", "ms-MY", "my-MM", "fil-PH"
+        ]
+        
+        # Determine primary language by testing first 15 seconds
         first_chunk = audio_mono[:min(15000, total_length_ms)]
         temp_first = f"temp_first_{uuid.uuid4().hex}.wav"
         first_chunk.export(temp_first, format="wav")
@@ -137,7 +144,7 @@ def transcribe_audio_video(file_path: str) -> str:
         detected_lang = "km-KH"
         with sr.AudioFile(temp_first) as source:
             audio_data = recognizer.record(source)
-            for lang in ["km-KH", "en-US", "zh-CN", "fr-FR", "es-ES", "ja-JP"]:
+            for lang in global_langs:
                 try:
                     t = recognizer.recognize_google(audio_data, language=lang)
                     if t and len(t.strip()) > 2:
@@ -148,7 +155,7 @@ def transcribe_audio_video(file_path: str) -> str:
         if os.path.exists(temp_first):
             os.remove(temp_first)
 
-        # Transcribe every 15-second chunk sequentially
+        # Transcribe every 15-second chunk sequentially with language fallback
         with sr.AudioFile(temp_wav) as source:
             for start_ms in range(0, total_length_ms, chunk_length_ms):
                 try:
@@ -156,12 +163,20 @@ def transcribe_audio_video(file_path: str) -> str:
                     if duration_sec <= 0.5:
                         break
                     audio_data = recognizer.record(source, duration=duration_sec)
-                    try:
-                        chunk_text = recognizer.recognize_google(audio_data, language=detected_lang)
-                        if chunk_text:
-                            full_transcript.append(chunk_text)
-                    except sr.UnknownValueError:
-                        pass
+                    
+                    chunk_success = False
+                    # Try detected_lang first, then fallback to global languages
+                    for l_try in [detected_lang] + [l for l in global_langs if l != detected_lang]:
+                        try:
+                            chunk_text = recognizer.recognize_google(audio_data, language=l_try)
+                            if chunk_text:
+                                full_transcript.append(chunk_text)
+                                chunk_success = True
+                                break
+                        except sr.UnknownValueError:
+                            continue
+                        except Exception:
+                            continue
                 except Exception as e_chunk:
                     print(f"Chunk error at {start_ms}ms: {e_chunk}")
                     
