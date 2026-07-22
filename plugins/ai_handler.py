@@ -79,9 +79,13 @@ You are an expert in traditional Khmer units of measurement for Gold & Mass (ម
 Whenever users ask about Khmer measurement conversions (e.g., ជី, តម្លឹង, ហ៊ុន, លី, ហត្ថ, ព្យាម, សិន, ថាំង), use these exact conversion factors to calculate accurate answers and explain them clearly in Khmer!
 
 CRITICAL INSTRUCTION FOR IMAGES:
-You have a special built-in image generator. If the user asks you to generate, draw, or create an image/picture, DO NOT apologize and DO NOT say you reached a limit. You MUST reply with this exact URL format and NOTHING else:
-https://image.pollinations.ai/prompt/{description_with_underscores},_photorealistic?width=1920&height=1080&nologo=true
-Replace {description_with_underscores} with the requested image description (in English).
+You have a special built-in professional AI image generator powered by FLUX. If the user asks you to generate, draw, or create any image/picture, DO NOT apologize and DO NOT say you cannot. You MUST reply with ONLY this exact URL format and NOTHING else:
+https://image.pollinations.ai/prompt/{full_detailed_description},ultra-realistic,professional_photography,8K,RAW_photo,award-winning,cinematic_lighting,tack_sharp_focus,masterpiece_quality?model=flux&width=1920&height=1080&nologo=true&enhance=true
+Rules for the URL:
+- Replace {full_detailed_description} with the image subject described in rich English detail
+- Use underscores instead of spaces in the prompt
+- Add relevant style keywords: portrait→bokeh,Rembrandt_lighting | landscape→golden_hour,HDR | food→macro,studio_light | fantasy→Unreal_Engine_5,concept_art
+- Always include: photorealistic,8K,highly_detailed,masterpiece
 
 CRITICAL INSTRUCTION FOR VIDEOS:
 If the user asks for a video, you must reply: "Sorry, I cannot generate videos because AI video generation requires expensive paid APIs. However, I can generate images for you! Just ask me to draw an image."
@@ -250,29 +254,148 @@ import urllib.parse
 import re
 
 def clean_and_generate_image_url(raw_prompt):
+    """
+    Converts a plain user prompt into a professional-quality Pollinations FLUX image URL.
+    Applies subject-aware photography keywords so every image looks like it was
+    captured by a professional photographer with high-end gear.
+    """
     p = raw_prompt.strip()
     p_lower = p.lower()
-    
+
+    # ── Strip command prefixes ──────────────────────────────────────────────
     prefixes = [
+        "generate image of", "generate photo of", "generate picture of",
         "generate image", "generat image", "generate photo", "generate picture",
+        "draw image of", "draw picture of", "draw photo of",
         "draw image", "draw picture", "draw photo", "draw a", "draw me", "draw",
+        "create image of", "create photo of", "create picture of",
         "create image", "create photo", "create picture", "create a",
+        "make image of", "make photo of", "make picture of",
         "make image", "make photo", "make picture", "make a",
-        "picture of", "photo of", "image of"
+        "picture of", "photo of", "image of", "show me",
+        "i want", "can you draw", "please draw", "please generate",
+        "generate", "create", "make",
     ]
-    for pref in prefixes:
+    for pref in sorted(prefixes, key=len, reverse=True):
         if p_lower.startswith(pref):
             p = p[len(pref):].strip()
+            p = p.lstrip(": ,-")
             break
-            
-    p = p.lstrip(": ,-")
+
     if not p:
-        p = "beautiful high quality masterpiece"
-        
-    enhanced_prompt = f"{p}, Full HD, 1080p, 8k resolution, photorealistic, masterpiece, highly detailed, professional photography, crisp focus"
-    encoded_prompt = urllib.parse.quote(enhanced_prompt)
-    
-    return f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&width=1920&height=1080&nologo=true&enhance=true"
+        p = "beautiful cinematic scene"
+
+    # ── Detect subject type for targeted prompt engineering ─────────────────
+    low = p.lower()
+
+    is_portrait    = any(w in low for w in ["person", "man", "woman", "girl", "boy", "face", "model", "people", "human", "child", "baby", "lady", "gentleman", "selfie", "portrait", "athlete"])
+    is_landscape   = any(w in low for w in ["landscape", "mountain", "forest", "ocean", "sea", "lake", "river", "sunset", "sunrise", "sky", "nature", "field", "valley", "waterfall", "desert", "beach", "jungle"])
+    is_cityscape   = any(w in low for w in ["city", "street", "building", "architecture", "urban", "skyscraper", "town", "bridge", "road", "night city", "downtown", "skyline", "alley"])
+    is_food        = any(w in low for w in ["food", "meal", "dish", "cake", "dessert", "coffee", "drink", "restaurant", "cuisine", "soup", "burger", "pizza", "sushi", "fruit", "vegetable", "bread"])
+    is_product     = any(w in low for w in ["product", "watch", "phone", "car", "perfume", "bottle", "shoe", "sneaker", "bag", "jewelry", "ring", "necklace", "advertisement", "commercial"])
+    is_animal      = any(w in low for w in ["animal", "dog", "cat", "lion", "tiger", "bird", "wolf", "horse", "deer", "elephant", "fox", "rabbit", "wildlife"])
+    is_fantasy     = any(w in low for w in ["fantasy", "dragon", "magic", "wizard", "fairy", "mythical", "creature", "elf", "dwarf", "sword", "castle", "kingdom", "mystical", "enchanted", "sci-fi", "cyberpunk", "futuristic", "space", "alien", "robot"])
+    is_interior    = any(w in low for w in ["room", "interior", "bedroom", "living room", "kitchen", "office", "bathroom", "hall", "corridor", "studio", "café", "library"])
+
+    # ── Build subject-specific professional photography enhancement ──────────
+    if is_portrait:
+        quality_suffix = (
+            "ultra-realistic portrait photography, shot on Sony A7R V with 85mm f/1.4 GM lens, "
+            "shallow depth of field, bokeh background, Rembrandt lighting, golden hour skin tone, "
+            "high-end fashion editorial style, retouched skin, sharp eyes, natural hair detail, "
+            "Vogue magazine quality, award-winning portrait, 8K, RAW photo, color graded"
+        )
+        width, height = 1080, 1350  # portrait aspect ratio
+
+    elif is_landscape:
+        quality_suffix = (
+            "breathtaking landscape photography, shot on Canon EOS R5 with 16-35mm f/2.8L lens, "
+            "long exposure, golden hour, dramatic clouds, high dynamic range, "
+            "National Geographic quality, ultra-wide perspective, vivid colors, "
+            "award-winning nature photography, ultra-detailed foreground, tack sharp, 8K RAW"
+        )
+        width, height = 1920, 1080  # cinematic wide
+
+    elif is_cityscape:
+        quality_suffix = (
+            "stunning architectural photography, shot on Nikon Z9 with 24-70mm f/2.8S lens, "
+            "blue hour or golden hour lighting, reflections, long exposure light trails, "
+            "high dynamic range, Architectural Digest quality, ultra-sharp details, "
+            "perfect perspective correction, professional color grading, 8K"
+        )
+        width, height = 1920, 1080
+
+    elif is_food:
+        quality_suffix = (
+            "professional food photography, shot on Canon EOS 5D Mark IV with 100mm macro lens, "
+            "soft natural window light, styled by a professional food stylist, "
+            "shallow depth of field, perfect plating, steam and texture visible, "
+            "Michelin-star restaurant quality, appetizing color grading, 8K, ultra-detailed"
+        )
+        width, height = 1080, 1080  # square for food
+
+    elif is_product:
+        quality_suffix = (
+            "luxury commercial product photography, studio lighting setup, "
+            "shot on Hasselblad H6D with 120mm macro, pure background, perfect reflections, "
+            "crisp product edges, professional retouching, advertising campaign quality, "
+            "8K ultra-sharp, color calibrated, award-winning commercial photography"
+        )
+        width, height = 1080, 1080
+
+    elif is_animal:
+        quality_suffix = (
+            "stunning wildlife photography, shot on Nikon D850 with 600mm f/4 telephoto lens, "
+            "natural habitat, perfect bokeh background, sharp animal fur and eye detail, "
+            "golden hour warm light, National Geographic quality, "
+            "award-winning wildlife photography, 8K RAW, ultra-detailed"
+        )
+        width, height = 1920, 1080
+
+    elif is_fantasy:
+        quality_suffix = (
+            "epic fantasy digital art, hyper-detailed, cinematic lighting, "
+            "dramatic atmosphere, volumetric fog, concept art quality, "
+            "rendered in Unreal Engine 5, 8K resolution, award-winning illustration, "
+            "intricate details, dramatic color palette, artstation trending, "
+            "Greg Rutkowski style, professional digital painting"
+        )
+        width, height = 1920, 1080
+
+    elif is_interior:
+        quality_suffix = (
+            "professional interior design photography, shot on Canon EOS R5 with 24mm tilt-shift lens, "
+            "natural diffused lighting, architectural details sharp, "
+            "Architectural Digest quality, perfect color temperature, "
+            "ultra-detailed materials and textures, 8K, professional interior styling"
+        )
+        width, height = 1920, 1080
+
+    else:
+        # Universal high-quality default
+        quality_suffix = (
+            "ultra-realistic, shot on Sony A7R V, professional photography, "
+            "cinematic color grading, perfect lighting, tack sharp focus, "
+            "8K resolution, RAW photo, award-winning, highly detailed, "
+            "masterpiece quality, HDR, ultra-wide color gamut"
+        )
+        width, height = 1920, 1080
+
+    # ── Universal negative quality blockers added to all prompts ────────────
+    negative_blockers = (
+        "no blur, no watermark, no text overlay, no distortion, "
+        "no extra limbs, anatomically correct, no artifacts"
+    )
+
+    # ── Assemble full enhanced prompt ───────────────────────────────────────
+    enhanced = f"{p}, {quality_suffix}, {negative_blockers}"
+    encoded  = urllib.parse.quote(enhanced)
+
+    # Use FLUX model with enhance=true for maximum quality
+    return (
+        f"https://image.pollinations.ai/prompt/{encoded}"
+        f"?model=flux&width={width}&height={height}&nologo=true&enhance=true&seed=-1"
+    )
 
 def extract_image_url(text):
     match = re.search(r'https?://image\.pollinations\.ai/prompt/[^\s\)\>\]]+', text)
