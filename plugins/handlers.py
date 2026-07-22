@@ -503,7 +503,7 @@ async def safe_edit_text(message, text, reply_markup=None):
     except Exception as e:
         print(f"Error editing message: {e}")
 
-@Client.on_callback_query()
+@Client.on_callback_query(filters.regex(r"^(help_|back_to_menu|file_show_|url_show_|ask_ai\||ask_doc\||dl_|url_dub_lang\||recap_url\||conv_|dub_lang\||recap_file\|)"))
 async def button_callback(client, callback_query):
     data = callback_query.data
     query_msg = callback_query.message
