@@ -47,7 +47,8 @@ def _load_offset() -> tuple[int, int]:
                 else:
                     try:
                         val = int(line)
-                        if val > last_update_id:
+                        # Telegram update_ids are strictly positive integers < 1,500,000,000
+                        if 0 < val < 1500000000 and val > last_update_id:
                             last_update_id = val
                     except ValueError:
                         pass
@@ -59,8 +60,9 @@ def _load_offset() -> tuple[int, int]:
 def _save_offset(update_id: int):
     """Save the latest processed update_id (overwrite entire file cleanly)."""
     try:
-        with open(OFFSET_FILE, "w") as f:
-            f.write(str(update_id) + "\n")
+        if 0 < update_id < 1500000000:
+            with open(OFFSET_FILE, "w") as f:
+                f.write(str(update_id) + "\n")
     except Exception as e:
         logger.warning(f"[Recovery] Could not save offset: {e}")
 
@@ -68,18 +70,26 @@ def _save_offset(update_id: int):
 def _fetch_updates(token: str, offset: int) -> list:
     """Fetch pending Telegram updates starting from `offset`."""
     try:
+        if offset > 1500000000:
+            offset = 0
+
         url = f"https://api.telegram.org/bot{token}/getUpdates"
-        resp = _requests.get(url, params={
-            "offset": offset + 1,
+        params = {
             "limit": 100,
-            "timeout": 5,
+            "timeout": 2,
             "allowed_updates": ["message", "callback_query"]
-        }, timeout=15)
+        }
+        if offset > 0:
+            params["offset"] = offset + 1
+
+        resp = _requests.get(url, params=params, timeout=10)
         data = resp.json()
         if data.get("ok"):
             return data.get("result", [])
+        else:
+            logger.warning(f"[Recovery] getUpdates error response: {data}")
     except Exception as e:
-        logger.warning(f"[Recovery] getUpdates error: {e}")
+        logger.warning(f"[Recovery] getUpdates exception: {e}")
     return []
 
 
@@ -291,9 +301,17 @@ async def run_http_fallback_loop(token: str, wait_seconds: int):
     so the bot responds IMMEDIATELY to /start, /help, /howto, AI chat, and /image!
     Zero downtime for users while waiting for FloodWait to expire.
     """
+    # Delete any active webhook so getUpdates receives all pending messages
+    try:
+        _requests.post(f"https://api.telegram.org/bot{token}/deleteWebhook", json={"drop_pending_updates": False}, timeout=10)
+    except Exception:
+        pass
+
     logger.info(f"[Fallback] Starting HTTP Bot API polling for {wait_seconds}s (FloodWait active)...")
     end_time = time.time() + wait_seconds
     last_offset, _ = _load_offset()
+    if last_offset > 1500000000:
+        last_offset = 0
 
     from plugins.ai_handler import get_ai_response, clean_and_generate_image_url
 
