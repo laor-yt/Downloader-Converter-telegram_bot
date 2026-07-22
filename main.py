@@ -110,8 +110,8 @@ def main():
         # 2. Recover missed messages from while bot was offline
         try:
             from plugins.recovery import recover_missed_messages
-            logger.info("[Recovery] Checking for missed messages...")
-            await recover_missed_messages(token)
+            logger.info("[Recovery] Recovery feature disabled per user request.")
+            # await recover_missed_messages(token)
         except Exception as e:
             logger.error(f"[Recovery] Error during recovery: {e}")
 
