@@ -174,7 +174,16 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
     
     import asyncio
     from plugins.ai_handler import get_ai_response
-    prompt = f"Translate the following spoken transcript accurately into natural spoken {target_lang_name}. Output ONLY the raw spoken sentences in {target_lang_name} script to be read aloud as a voiceover narration. Absolutely NO English words, NO headers, NO markdown, NO quotes, NO explanations:\n\n{transcript}"
+    prompt = (
+        f"You are a professional movie dubbing director and voiceover scriptwriter.\n"
+        f"Translate and adapt the following spoken transcript into natural, professional spoken {target_lang_name}.\n"
+        f"Guidelines:\n"
+        f"1. Make the phrasing sound like a native human speaker giving an engaging, fluent voiceover narration.\n"
+        f"2. Remove filler words (um, uh, like) and smooth out choppy or awkward sentence structures.\n"
+        f"3. Insert proper punctuation (commas, periods, question marks) so text-to-speech reads with natural human rhythm, pauses, and cadence.\n"
+        f"4. Output ONLY the raw spoken translation in {target_lang_name} script (NO English explanations, NO markdown, NO headers, NO quotes):\n\n"
+        f"{transcript}"
+    )
     
     try:
         try:
@@ -186,7 +195,7 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
         print(f"AI Translation Error: {e}")
         translated_text = transcript
         
-    # Clean text strictly for gTTS speech
+    # Clean text strictly for gTTS speech with natural human pause punctuation
     translated_text = re.sub(r'[*#_~`>\[\]\(\)]', ' ', translated_text)
     translated_text = re.sub(r'^(Here is|Translation|Translate|Khmer|English|Note):.*$', '', translated_text, flags=re.MULTILINE | re.IGNORECASE)
     translated_text = " ".join(translated_text.split()).strip()
@@ -194,15 +203,34 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
     if not translated_text:
         return "ERROR: Translation resulted in empty speech text."
         
-    if progress_callback: progress_callback("🎙 Generating natural voiceover dubbing...")
+    if progress_callback: progress_callback("🎙 Generating studio-quality voiceover dubbing...")
     from gtts import gTTS
     tts_lang = 'km' if target_lang.startswith('km') else ('zh-CN' if target_lang.startswith('zh') else target_lang[:2])
     
     raw_tts_output = os.path.join(temp_dir, f"{uuid.uuid4()}_raw_tts.mp3")
+    studio_tts_output = os.path.join(temp_dir, f"{uuid.uuid4()}_studio_tts.mp3")
     synced_tts_output = os.path.join(temp_dir, f"{uuid.uuid4()}_synced_tts.mp3")
+    
     try:
         tts = gTTS(text=translated_text, lang=tts_lang, slow=False)
         tts.save(raw_tts_output)
+        
+        # Apply professional audio studio filtering (lowpass/highpass EQ + warm volume boost)
+        try:
+            (
+                ffmpeg
+                .input(raw_tts_output)
+                .filter('highpass', f=80)
+                .filter('lowpass', f=12000)
+                .filter('volume', 1.2)
+                .output(studio_tts_output)
+                .overwrite_output()
+                .run(capture_stdout=True, capture_stderr=True)
+            )
+            if os.path.exists(studio_tts_output) and os.path.getsize(studio_tts_output) > 0:
+                raw_tts_output = studio_tts_output
+        except Exception as filter_e:
+            print(f"Audio filter error: {filter_e}")
     except Exception as e:
         print(f"gTTS Error: {e}")
         return f"ERROR: Failed to generate TTS voice: {e}"
@@ -315,11 +343,29 @@ def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=Fal
     tts_speech = " ".join(tts_speech.split()).strip()
     
     raw_tts = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_raw.mp3")
+    studio_tts = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_studio.mp3")
     synced_tts = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_synced.mp3")
     
     try:
         tts = gTTS(text=tts_speech, lang=tts_lang, slow=False)
         tts.save(raw_tts)
+        
+        # Apply professional audio studio filtering
+        try:
+            (
+                ffmpeg
+                .input(raw_tts)
+                .filter('highpass', f=80)
+                .filter('lowpass', f=12000)
+                .filter('volume', 1.2)
+                .output(studio_tts)
+                .overwrite_output()
+                .run(capture_stdout=True, capture_stderr=True)
+            )
+            if os.path.exists(studio_tts) and os.path.getsize(studio_tts) > 0:
+                raw_tts = studio_tts
+        except Exception as filter_e:
+            print(f"Recap Audio filter error: {filter_e}")
     except Exception as e:
         print(f"Recap TTS Error: {e}")
         return recap_text, None
