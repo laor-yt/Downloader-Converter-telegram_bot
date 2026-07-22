@@ -77,6 +77,20 @@ def transcribe_audio_video(file_path: str) -> str:
         audio_mono = audio.set_frame_rate(24000).set_channels(1)
         audio_mono.export(temp_mp3, format="mp3", bitrate="64k")
         
+        # 0. Primary Local High-Performance Speech Engine: faster-whisper (8 CPU cores)
+        try:
+            from faster_whisper import WhisperModel
+            # Initialize model (small/medium) using 8 CPU threads & int8 quantization for max speed
+            # Downloaded once and cached locally
+            whisper_model = WhisperModel("small", device="cpu", compute_type="int8", cpu_threads=8)
+            segments, info = whisper_model.transcribe(temp_mp3, beam_size=5)
+            local_text = " ".join([segment.text for segment in segments]).strip()
+            if local_text and len(local_text) > 3:
+                print(f"[Whisper Local] Transcribed {info.duration:.1f}s audio in language '{info.language}' (probability {info.language_probability:.2f})")
+                return local_text
+        except Exception as whisper_e:
+            print(f"[Whisper Local] Local whisper error/not loaded: {whisper_e}")
+
         # 1. Try Gemini Flash for exact verbatim transcription (temperature=0)
         api_key = os.environ.get("GEMINI_API_KEY")
         if api_key and os.path.exists(temp_mp3):

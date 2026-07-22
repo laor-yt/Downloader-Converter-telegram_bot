@@ -2,8 +2,8 @@ FROM python:3.11-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies including ffmpeg and Node.js 20 LTS (for yt-dlp JS decryption)
-RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg && \
+# Install system dependencies including ffmpeg, build-essential for C++ compilation, and Node.js 20 LTS
+RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg build-essential cmake git libgomp1 && \
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y --no-install-recommends ffmpeg nodejs && \
     rm -rf /var/lib/apt/lists/*

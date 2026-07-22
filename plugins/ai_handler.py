@@ -136,6 +136,40 @@ async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):
         chat_history[chat_id] = [chat_history[chat_id][0]] + chat_history[chat_id][-12:]
 
     reply = None
+    # ── Try Local LLM (llama-cpp-python) on 8 CPU cores ──────────────────────
+    try:
+        from llama_cpp import Llama
+        global _LOCAL_LLM_INSTANCE
+        if '_LOCAL_LLM_INSTANCE' not in globals() or _LOCAL_LLM_INSTANCE is None:
+            # Auto-download small fast 3B model (2.0 GB) from Hugging Face for 32GB RAM / 8 CPU
+            _LOCAL_LLM_INSTANCE = Llama.from_pretrained(
+                repo_id="bartowski/Llama-3.2-3B-Instruct-GGUF",
+                filename="Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+                n_ctx=4096,
+                n_threads=8,
+                verbose=False
+            )
+            print("[Local LLM] Llama-3.2-3B model initialized on 8 CPU threads.")
+        
+        def run_local_llm():
+            res = _LOCAL_LLM_INSTANCE.create_chat_completion(
+                messages=chat_history[chat_id],
+                temperature=0.7,
+                max_tokens=1024
+            )
+            return res["choices"][0]["message"]["content"]
+            
+        reply = await asyncio.to_thread(run_local_llm)
+        if reply and len(reply.strip()) > 1:
+            chat_history[chat_id].append({"role": "assistant", "content": reply})
+            try:
+                from plugins.brain import bot_brain as _brain
+                _brain.record_interaction(user_prompt, reply)
+            except Exception: pass
+            return reply
+    except Exception as local_llm_e:
+        print(f"[Local LLM] Local inference skipped/fallback: {local_llm_e}")
+
     try:
         import requests
         def fetch_pollinations():
