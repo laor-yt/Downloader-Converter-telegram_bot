@@ -138,35 +138,51 @@ async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):
     reply = None
     # ── Try Local LLM (llama-cpp-python) on 8 CPU cores ──────────────────────
     try:
-        from llama_cpp import Llama
-        global _LOCAL_LLM_INSTANCE
-        if '_LOCAL_LLM_INSTANCE' not in globals() or _LOCAL_LLM_INSTANCE is None:
-            # Auto-download small fast 3B model (2.0 GB) from Hugging Face for 32GB RAM / 8 CPU
-            _LOCAL_LLM_INSTANCE = Llama.from_pretrained(
-                repo_id="bartowski/Llama-3.2-3B-Instruct-GGUF",
-                filename="Llama-3.2-3B-Instruct-Q4_K_M.gguf",
-                n_ctx=4096,
-                n_threads=8,
-                verbose=False
-            )
-            print("[Local LLM] Llama-3.2-3B model initialized on 8 CPU threads.")
-        
-        def run_local_llm():
-            res = _LOCAL_LLM_INSTANCE.create_chat_completion(
-                messages=chat_history[chat_id],
-                temperature=0.7,
-                max_tokens=1024
-            )
-            return res["choices"][0]["message"]["content"]
-            
-        reply = await asyncio.to_thread(run_local_llm)
-        if reply and len(reply.strip()) > 1:
-            chat_history[chat_id].append({"role": "assistant", "content": reply})
-            try:
-                from plugins.brain import bot_brain as _brain
-                _brain.record_interaction(user_prompt, reply)
-            except Exception: pass
-            return reply
+        global _LOCAL_LLM_INSTANCE, _LOCAL_LLM_LOADING
+        if '_LOCAL_LLM_LOADING' not in globals():
+            _LOCAL_LLM_LOADING = False
+            _LOCAL_LLM_INSTANCE = None
+
+        if _LOCAL_LLM_INSTANCE is None and not _LOCAL_LLM_LOADING:
+            _LOCAL_LLM_LOADING = True
+            def _load_model_bg():
+                global _LOCAL_LLM_INSTANCE, _LOCAL_LLM_LOADING
+                try:
+                    from llama_cpp import Llama
+                    _LOCAL_LLM_INSTANCE = Llama.from_pretrained(
+                        repo_id="bartowski/Llama-3.2-3B-Instruct-GGUF",
+                        filename="Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+                        n_ctx=4096,
+                        n_threads=8,
+                        verbose=False
+                    )
+                    print("[Local LLM] Llama-3.2-3B model initialized on 8 CPU threads.")
+                except Exception as load_e:
+                    print(f"[Local LLM] Model load error: {load_e}")
+                finally:
+                    _LOCAL_LLM_LOADING = False
+
+            # Load in background thread so event loop never freezes!
+            import threading
+            threading.Thread(target=_load_model_bg, daemon=True).start()
+
+        if _LOCAL_LLM_INSTANCE is not None:
+            def run_local_llm():
+                res = _LOCAL_LLM_INSTANCE.create_chat_completion(
+                    messages=chat_history[chat_id],
+                    temperature=0.7,
+                    max_tokens=1024
+                )
+                return res["choices"][0]["message"]["content"]
+                
+            reply = await asyncio.wait_for(asyncio.to_thread(run_local_llm), timeout=15.0)
+            if reply and len(reply.strip()) > 1:
+                chat_history[chat_id].append({"role": "assistant", "content": reply})
+                try:
+                    from plugins.brain import bot_brain as _brain
+                    _brain.record_interaction(user_prompt, reply)
+                except Exception: pass
+                return reply
     except Exception as local_llm_e:
         print(f"[Local LLM] Local inference skipped/fallback: {local_llm_e}")
 
