@@ -28,6 +28,18 @@ You are fully fluent in English and Khmer.
 - Always introduce or identify yourself as Udom when asked who you are.
 - Always use the current local time provided in context when answering time or date questions.
 
+CRITICAL FORMATTING INSTRUCTION FOR TABLES:
+Telegram markdown does NOT render HTML/Markdown pipe tables (| ... |) properly.
+NEVER use pipe tables like | header | header |.
+Instead, format all data tables using monospaced code blocks (```...```) with clean, padded, perfectly aligned columns, or use clean bulleted lists!
+Example of clean table format:
+```
+Karat  |  Price (KHR)   |  Price (USD)
+--------------------------------------
+24K    |  ៛537,510      |  $133.0
+22K    |  ៛492,293      |  $121.9
+```
+
 CRITICAL INSTRUCTION FOR IMAGES:
 You have a special built-in image generator. If the user asks you to generate, draw, or create an image/picture, DO NOT apologize and DO NOT say you reached a limit. You MUST reply with this exact URL format and NOTHING else:
 https://image.pollinations.ai/prompt/{description_with_underscores},_photorealistic?width=1024&height=1024&nologo=true
@@ -119,6 +131,50 @@ async def ask_command(client: Client, message: Message):
     reply = await get_ai_response(message.chat.id, prompt)
     
     await send_ai_reply_or_photo(message, processing_msg, reply, prompt_text=prompt)
+def analyze_media_with_gemini(file_path, prompt, mime_type="image/jpeg"):
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return None
+        
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        
+        import base64
+        import requests
+        with open(file_path, "rb") as f:
+            b64_data = base64.b64encode(f.read()).decode("utf-8")
+            
+        payload = {
+            "system_instruction": {
+                "parts": [{"text": SYSTEM_PROMPT}]
+            },
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt},
+                        {
+                            "inline_data": {
+                                "mime_type": mime_type,
+                                "data": b64_data
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+        
+        res = requests.post(url, json=payload, timeout=35)
+        res_json = res.json()
+        
+        if "candidates" in res_json and len(res_json["candidates"]) > 0:
+            candidate = res_json["candidates"][0]
+            if "content" in candidate and "parts" in candidate["content"]:
+                return candidate["content"]["parts"][0]["text"]
+    except Exception as e:
+        print(f"Gemini API Error: {e}")
+        
+    return None
+
 import urllib.parse
 import re
 
@@ -283,9 +339,27 @@ async def private_ai_chat(client: Client, message: Message):
                 processing_msg = await message.reply_text("🤔 Udom is analyzing your file...", reply_to_message_id=message.id)
                 try:
                     file_path = await client.download_media(original_msg)
+                    
+                    mime_type = "image/jpeg"
+                    if original_msg.photo:
+                        mime_type = "image/jpeg"
+                    elif original_msg.video:
+                        mime_type = original_msg.video.mime_type or "video/mp4"
+                    elif original_msg.audio or original_msg.voice:
+                        mime_type = getattr(original_msg.audio or original_msg.voice, 'mime_type', "audio/mp3")
+                    elif original_msg.document:
+                        mime_type = original_msg.document.mime_type or "application/pdf"
+                        
+                    # 1. Try Gemini Vision first (for true visual image/video analysis)
+                    gemini_reply = await asyncio.to_thread(analyze_media_with_gemini, file_path, text, mime_type)
+                    if gemini_reply:
+                        cleanup_file(file_path)
+                        await send_ai_reply_or_photo(message, processing_msg, gemini_reply, prompt_text=text)
+                        return
+
+                    # 2. Fallback to OCR / Speech / Document parsing
                     file_content = ""
                     image_url = None
-                    
                     is_img = original_msg.photo or (original_msg.document and str(original_msg.document.mime_type or "").startswith("image/"))
                     if is_img:
                         import requests
@@ -309,12 +383,12 @@ async def private_ai_chat(client: Client, message: Message):
                     elif original_msg.audio or original_msg.voice or (original_msg.video and not original_msg.photo):
                         file_content = transcribe_audio_video(file_path)
                     elif original_msg.document:
-                        mime_type = str(original_msg.document.mime_type or "")
+                        doc_mime = str(original_msg.document.mime_type or "")
                         file_name = str(original_msg.document.file_name or "").lower()
-                        if mime_type.startswith("video/") or mime_type.startswith("audio/") or file_name.endswith(('.mp4', '.mkv', '.mp3', '.wav', '.ogg')):
+                        if doc_mime.startswith("video/") or doc_mime.startswith("audio/") or file_name.endswith(('.mp4', '.mkv', '.mp3', '.wav', '.ogg')):
                             file_content = transcribe_audio_video(file_path)
                         else:
-                            file_content = parse_document(file_path, mime_type)
+                            file_content = parse_document(file_path, doc_mime)
                             
                     cleanup_file(file_path)
                     
