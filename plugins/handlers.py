@@ -114,6 +114,46 @@ async def download_command(client, message):
     ])
     await message.reply_text("Link detected. What would you like to do?", reply_markup=keyboard)
 
+# Automatic URL detector: Automatically shows download buttons whenever a user pastes a link
+@Client.on_message(filters.text & filters.private & ~filters.command(["download", "convert", "start", "help", "ask", "image", "search"]), group=0)
+async def auto_url_and_menu_handler(client, message):
+    text = message.text.strip()
+    
+    # 1. If text contains a URL, trigger download menu automatically
+    words = text.split()
+    found_url = None
+    for w in words:
+        if is_url(w):
+            found_url = w
+            break
+            
+    if found_url:
+        short_id = str(uuid.uuid4())[:8]
+        url_cache[short_id] = found_url
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🎬 Download Video", callback_data=f"dl_vid|{short_id}"),
+                InlineKeyboardButton("🎵 Download Audio", callback_data=f"dl_aud|{short_id}")
+            ]
+        ])
+        await message.reply_text(f"🔗 **Link Detected:** `{found_url}`\nWhat would you like to do?", reply_markup=keyboard)
+        message.stop_propagation()
+        return
+
+    # 2. If user asks for menu or help in natural language
+    if text.lower() in ["menu", "help", "start", "options", "commands"]:
+        welcome_message = (
+            "👋 Welcome to the **Telegram AI Bot**!\n\n"
+            "To see all available commands, tap the Menu button or use the buttons below."
+        )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🛠 Commands (Help)", callback_data="show_help")],
+            [InlineKeyboardButton("ℹ️ About", callback_data="show_about")]
+        ])
+        await message.reply_text(welcome_message, reply_markup=keyboard)
+        message.stop_propagation()
+        return
+
 @Client.on_message(filters.command("convert"))
 async def convert_command(client, message):
     from pyrogram.types import ForceReply
