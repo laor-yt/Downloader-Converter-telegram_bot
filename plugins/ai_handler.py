@@ -524,7 +524,7 @@ async def search_command(client: Client, message: Message):
         await processing_msg.edit_text("Sorry, an error occurred while searching the web.")
 
 # Handle mentions and replies to the bot in groups
-@Client.on_message(filters.text & filters.group & ~filters.command(["start", "help", "ask", "search", "image", "download", "convert", "finance", "market"]), group=1)
+@Client.on_message(filters.text & filters.group & ~filters.command(["start", "help", "ask", "search", "image", "video", "download", "convert", "finance", "market"]), group=1)
 async def group_ai_chat(client: Client, message: Message):
     bot = await client.get_me()
     
@@ -555,7 +555,7 @@ async def group_ai_chat(client: Client, message: Message):
             await processing_msg.edit_text(reply)
 
 # Handle AI chat in private messages (if it's not a URL or command)
-@Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "ask", "search", "image", "download", "convert", "finance", "market"]), group=1)
+@Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "ask", "search", "image", "video", "download", "convert", "finance", "market"]), group=1)
 async def private_ai_chat(client: Client, message: Message):
     text = message.text
     # Ignore predefined menu buttons

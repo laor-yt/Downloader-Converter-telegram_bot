@@ -123,7 +123,7 @@ async def recover_missed_messages(token: str):
             skipped += 1
             continue
 
-        if cmd_word in {"/download", "/convert", "/image", "/ask", "/search"}:
+        if cmd_word in {"/download", "/convert", "/image", "/ask", "/search", "/video"}:
             if cmd_word == "/ask":
                 text = " ".join(text.split()[1:]).strip() or "Hello"
             elif cmd_word == "/search":
@@ -153,7 +153,7 @@ async def recover_missed_messages(token: str):
                 else:
                     skipped += 1
                 continue
-            elif cmd_word in {"/download", "/convert"}:
+            elif cmd_word in {"/download", "/convert", "/video"}:
                 _send_reply(
                     token, chat_id,
                     f"⚠️ _I was offline when you sent this. I'm back now!_\n"
@@ -407,6 +407,9 @@ async def run_http_fallback_loop(token: str, wait_seconds: int):
                         _send_reply(token, chat_id, ans, reply_to_id=msg_id)
                     else:
                         _send_reply(token, chat_id, "🔍 Usage: `/search <query>`", reply_to_id=msg_id)
+
+                elif cmd_lower == "/video":
+                    _send_reply(token, chat_id, "⏱ _The AI Video Generator is currently warming up... please wait about 30 seconds and try your command again!_", reply_to_id=msg_id)
 
                 else:
                     # Regular AI chat
