@@ -3,7 +3,7 @@ import uuid
 import time
 import asyncio
 from pyrogram import Client, filters, ContinuePropagation
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, Message
 from pyrogram.errors import MessageNotModified
 from downloader import download_media
 from converter import convert_video_to_audio, convert_video_format, convert_image_format
