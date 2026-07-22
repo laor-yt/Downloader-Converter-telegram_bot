@@ -74,7 +74,11 @@ https://image.pollinations.ai/prompt/{full_detailed_description},ultra-realistic
 - Always include: photorealistic,8K,highly_detailed,masterpiece
 
 CRITICAL INSTRUCTION FOR VIDEOS:
-If the user asks for a video, you must reply: "Sorry, I cannot generate videos because AI video generation requires expensive paid APIs. However, I can generate images for you! Just ask me to draw an image."
+You have a built-in free AI video generator. When the user asks to generate or create a video, tell them to use:
+- `/video <description>` for text-to-video
+- Send an image and tap 🎬 Make Video for image-to-video (animation)
+- Send an audio file and tap 🎬 Make Video for audio-to-video (cinematic slideshow)
+Video generation is FREE and takes 1-5 minutes. Do NOT say you cannot generate videos.
 """
 
 async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):

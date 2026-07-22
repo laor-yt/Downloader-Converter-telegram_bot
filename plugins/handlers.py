@@ -358,11 +358,14 @@ async def handle_media(client, message):
     file_id = None
     file_name = ""
     mime_type = ""
-    
+    is_photo = False
+    is_audio_file = False
+
     if target_msg.photo:
         file_id = target_msg.photo.file_id
         file_name = "image.jpg"
         mime_type = "image/jpeg"
+        is_photo = True
     elif target_msg.video:
         file_id = target_msg.video.file_id
         file_name = target_msg.video.file_name or "video.mp4"
@@ -372,22 +375,43 @@ async def handle_media(client, message):
         file_id = audio.file_id
         file_name = getattr(audio, 'file_name', "audio.mp3")
         mime_type = getattr(audio, 'mime_type', "audio/mpeg")
+        is_audio_file = True
     elif target_msg.document:
         file_id = target_msg.document.file_id
         file_name = target_msg.document.file_name or "document"
         mime_type = target_msg.document.mime_type or ""
+        if mime_type.startswith("image/"):
+            is_photo = True
+        elif mime_type.startswith("audio/"):
+            is_audio_file = True
 
     if file_id:
         short_id = str(uuid.uuid4())[:8]
-        url_cache[short_id] = target_msg # Store full message object for downloading
-        
-        keyboard = InlineKeyboardMarkup([
+        url_cache[short_id] = target_msg
+
+        # Build smart action buttons based on file type
+        buttons = [
             [
                 InlineKeyboardButton("🔄 Convert", callback_data=f"file_show_conv|{short_id}"),
                 InlineKeyboardButton("🤖 Ask AI", callback_data=f"file_show_ask|{short_id}")
             ]
-        ])
-        await message.reply_text(f"📁 **File Received:** `{file_name}`\nWhat would you like to do?", reply_markup=keyboard)
+        ]
+
+        if is_photo:
+            buttons.append([
+                InlineKeyboardButton("🎬 Make Video (Animate)", callback_data=f"make_video_img|{short_id}")
+            ])
+        elif is_audio_file:
+            buttons.append([
+                InlineKeyboardButton("🎬 Make Video (Audio → Video)", callback_data=f"make_video_aud|{short_id}")
+            ])
+
+        keyboard = InlineKeyboardMarkup(buttons)
+        await message.reply_text(
+            f"📁 **File Received:** `{file_name}`\nWhat would you like to do?",
+            reply_markup=keyboard
+        )
+
 
 class RealtimeTimer:
     def __init__(self, message, initial_text="Thinking"):
@@ -1077,3 +1101,158 @@ async def button_callback(client, callback_query):
                 error_str = str(e)
                 print(f"Error in callback: {error_str}")
                 await safe_edit_text(query_msg, f"❌ An error occurred: {error_str}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  🎬  AI VIDEO GENERATOR  (Text / Image / Audio → Video)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@Client.on_message(filters.command("video"), group=1)
+async def video_command(client: Client, message: Message):
+    """
+    /video <prompt>  — Generate a video from a text description.
+    Example: /video a sunset over the ocean with waves crashing
+    """
+    if len(message.command) < 2:
+        await message.reply_text(
+            "🎬 **AI Video Generator**\n\n"
+            "**Text → Video:** `/video <description>`\n"
+            "_Example:_ `/video a lion running across the savanna at sunset`\n\n"
+            "**Image → Video:** Send a photo → tap **🎬 Make Video (Animate)**\n\n"
+            "**Audio → Video:** Send an audio file → tap **🎬 Make Video (Audio → Video)**\n\n"
+            "⏱ _Video generation takes 1–5 minutes. Please be patient!_"
+        )
+        return
+
+    prompt = " ".join(message.command[1:])
+    proc = await message.reply_text(f"⏱ [00:00] 🎬 Starting video generation…")
+
+    try:
+        from plugins.video_generator import text_to_video, compress_for_telegram
+        from utils import get_temp_dir
+
+        video_path = None
+        async with RealtimeTimer(proc, "🎬 Generating video (this takes 1-5 min)"):
+            video_path = await text_to_video(
+                prompt,
+                progress_callback=lambda msg: proc.edit_text(f"⏳ {msg}") and None
+            )
+
+        if video_path and os.path.exists(video_path):
+            video_path = compress_for_telegram(video_path, get_temp_dir())
+            await proc.edit_text("📤 Uploading video…")
+            await message.reply_video(
+                video_path,
+                caption=f"🎬 **AI Generated Video**\n\n📝 `{prompt}`\n\n_Generated with free AI — Udom Bot_",
+                supports_streaming=True
+            )
+            await proc.delete()
+            cleanup_file(video_path)
+        else:
+            await proc.edit_text(
+                "⚠️ **Video generation failed.** The free AI models may be overloaded.\n\n"
+                "Please try again in a few minutes, or try with a shorter/simpler prompt.\n\n"
+                "_Tip: Try `/image` for instant image generation instead!_"
+            )
+    except Exception as e:
+        print(f"[/video] Error: {e}")
+        await proc.edit_text(f"❌ Error generating video: {str(e)[:200]}")
+
+
+@Client.on_callback_query(filters.regex(r"^make_video_img\|(.+)$"))
+async def handle_image_to_video(client: Client, query):
+    """Animate a user-sent image using Stable Video Diffusion."""
+    short_id = query.data.split("|", 1)[1]
+    orig_msg = url_cache.get(short_id)
+    if not orig_msg:
+        await query.answer("Session expired. Please resend the image.", show_alert=True)
+        return
+
+    await query.answer()
+    proc = await query.message.reply_text("⏱ [00:00] 🎬 Animating your image…")
+
+    try:
+        from plugins.video_generator import image_to_video, compress_for_telegram
+        from utils import get_temp_dir
+        import tempfile
+
+        temp_dir = get_temp_dir()
+        input_path = os.path.join(temp_dir, f"i2v_src_{uuid.uuid4().hex}.jpg")
+        await orig_msg.download(file_name=input_path)
+
+        video_path = None
+        async with RealtimeTimer(proc, "🎬 Stable Video Diffusion animating image"):
+            video_path = await image_to_video(
+                input_path,
+                progress_callback=lambda msg: None
+            )
+
+        cleanup_file(input_path)
+
+        if video_path and os.path.exists(video_path):
+            video_path = compress_for_telegram(video_path, temp_dir)
+            await proc.edit_text("📤 Uploading animated video…")
+            await query.message.reply_video(
+                video_path,
+                caption="🎬 **Image → Video** (Stable Video Diffusion)\n_Your image brought to life by AI!_",
+                supports_streaming=True
+            )
+            await proc.delete()
+            cleanup_file(video_path)
+        else:
+            await proc.edit_text(
+                "⚠️ **Animation failed.** The SVD model may be loading or overloaded.\n"
+                "Please try again in ~2 minutes."
+            )
+    except Exception as e:
+        print(f"[image_to_video] Error: {e}")
+        await proc.edit_text(f"❌ Error: {str(e)[:200]}")
+
+
+@Client.on_callback_query(filters.regex(r"^make_video_aud\|(.+)$"))
+async def handle_audio_to_video(client: Client, query):
+    """Convert audio to a cinematic video slideshow."""
+    short_id = query.data.split("|", 1)[1]
+    orig_msg = url_cache.get(short_id)
+    if not orig_msg:
+        await query.answer("Session expired. Please resend the audio.", show_alert=True)
+        return
+
+    await query.answer()
+    proc = await query.message.reply_text("⏱ [00:00] 🎬 Starting audio → video generation…")
+
+    try:
+        from plugins.video_generator import audio_to_video, compress_for_telegram
+        from utils import get_temp_dir
+
+        temp_dir = get_temp_dir()
+        input_path = os.path.join(temp_dir, f"a2v_src_{uuid.uuid4().hex}.mp3")
+        await orig_msg.download(file_name=input_path)
+
+        video_path = None
+        async with RealtimeTimer(proc, "🎬 Creating cinematic video from audio"):
+            video_path = await audio_to_video(
+                input_path,
+                progress_callback=lambda msg: None
+            )
+
+        cleanup_file(input_path)
+
+        if video_path and os.path.exists(video_path):
+            video_path = compress_for_telegram(video_path, temp_dir)
+            await proc.edit_text("📤 Uploading video…")
+            await query.message.reply_video(
+                video_path,
+                caption="🎬 **Audio → Video**\n_AI-generated cinematic scenes synced to your audio!_",
+                supports_streaming=True
+            )
+            await proc.delete()
+            cleanup_file(video_path)
+        else:
+            await proc.edit_text(
+                "⚠️ **Video generation failed.**\n"
+                "Please try again in a few minutes."
+            )
+    except Exception as e:
+        print(f"[audio_to_video] Error: {e}")
+        await proc.edit_text(f"❌ Error: {str(e)[:200]}")

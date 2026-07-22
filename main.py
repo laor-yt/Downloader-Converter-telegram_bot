@@ -90,12 +90,14 @@ def main():
                 BotCommand("start", "Start the bot"),
                 BotCommand("download", "Download media from a link"),
                 BotCommand("convert", "Convert a media file"),
+                BotCommand("video", "🎬 Generate AI video (text/image/audio)"),
                 BotCommand("image", "Generate a professional AI image"),
                 BotCommand("ask", "Ask the AI a question"),
                 BotCommand("search", "Search the web with AI"),
                 BotCommand("train", "Trigger AI self-training research session"),
                 BotCommand("brainstats", "View brain knowledge base stats"),
                 BotCommand("timezone", "Set your local timezone"),
+                BotCommand("howto", "How to use this bot (Khmer/English)"),
                 BotCommand("help", "Show all features & help info")
             ])
             import requests
