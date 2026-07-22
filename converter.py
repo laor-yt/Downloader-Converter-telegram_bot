@@ -95,3 +95,58 @@ def convert_image_format(input_path, output_format='png'):
     except Exception as e:
         print(f"Error converting image format: {e}")
         return None
+
+def convert_document_format(input_path, output_format='pdf'):
+    """
+    Converts a document (PDF, DOCX, TXT) to another document format (PDF, DOCX, TXT).
+    """
+    temp_dir = get_temp_dir()
+    output_filename = f"{uuid.uuid4()}.{output_format}"
+    output_path = os.path.join(temp_dir, output_filename)
+    
+    ext = os.path.splitext(input_path)[1].lower()
+    extracted_text = ""
+    
+    try:
+        if ext == '.pdf':
+            import fitz
+            doc = fitz.open(input_path)
+            for page in doc:
+                extracted_text += page.get_text() + "\n"
+        elif ext in ['.docx', '.doc']:
+            import docx
+            doc = docx.Document(input_path)
+            extracted_text = "\n".join([p.text for p in doc.paragraphs])
+        else:
+            with open(input_path, 'r', encoding='utf-8', errors='ignore') as f:
+                extracted_text = f.read()
+                
+        if not extracted_text.strip():
+            extracted_text = "No text content found in original file."
+
+        if output_format == 'txt':
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(extracted_text)
+            return output_path
+            
+        elif output_format == 'docx':
+            import docx
+            doc = docx.Document()
+            for line in extracted_text.split('\n'):
+                doc.add_paragraph(line)
+            doc.save(output_path)
+            return output_path
+            
+        elif output_format == 'pdf':
+            import fitz
+            doc = fitz.open()
+            page = doc.new_page()
+            margin = 50
+            rect = fitz.Rect(margin, margin, page.rect.width - margin, page.rect.height - margin)
+            page.insert_textbox(rect, extracted_text, fontsize=11)
+            doc.save(output_path)
+            return output_path
+            
+    except Exception as e:
+        print(f"Error converting document: {e}")
+        return None

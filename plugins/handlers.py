@@ -189,35 +189,13 @@ async def handle_media(client, message):
         short_id = str(uuid.uuid4())[:8]
         url_cache[short_id] = target_msg # Store full message object for downloading
         
-        if mime_type.startswith('image/'):
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("💬 Ask AI about Image", callback_data=f"ask_ai|{short_id}")],
-                [InlineKeyboardButton("Convert to PNG", callback_data=f"conv_img|{short_id}|png")],
-                [InlineKeyboardButton("Convert to JPG", callback_data=f"conv_img|{short_id}|jpg")],
-                [InlineKeyboardButton("Convert to WEBP", callback_data=f"conv_img|{short_id}|webp")],
-            ])
-            await message.reply_text(f"Image received: {file_name}. Choose an action:", reply_markup=keyboard)
-        elif mime_type.startswith('video/'):
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("💬 Analyze Audio with AI", callback_data=f"ask_doc|{short_id}")],
-                [InlineKeyboardButton("Convert to MP3", callback_data=f"conv_aud|{short_id}")],
-                [InlineKeyboardButton("Convert to MP4", callback_data=f"conv_vid|{short_id}|mp4")],
-                [InlineKeyboardButton("Convert to MKV", callback_data=f"conv_vid|{short_id}|mkv")],
-            ])
-            await message.reply_text(f"Video received: {file_name}. Choose an action:", reply_markup=keyboard)
-        elif mime_type.startswith('audio/'):
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("💬 Analyze with AI", callback_data=f"ask_doc|{short_id}")],
-                [InlineKeyboardButton("Convert to MP3", callback_data=f"conv_aud|{short_id}")]
-            ])
-            await message.reply_text(f"Audio received: {file_name}. Choose an action:", reply_markup=keyboard)
-        elif mime_type.startswith('application/pdf') or 'word' in mime_type or 'excel' in mime_type or 'spreadsheet' in mime_type or 'powerpoint' in mime_type or 'presentation' in mime_type or file_name.lower().endswith(('.pdf', '.docx', '.xlsx', '.pptx', '.csv', '.doc', '.xls', '.ppt')):
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("💬 Analyze with AI", callback_data=f"ask_doc|{short_id}")]
-            ])
-            await message.reply_text(f"Document received: {file_name}. Choose an action:", reply_markup=keyboard)
-        else:
-            await message.reply_text(f"Received unsupported file type: {mime_type or 'Unknown'}")
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🔄 Convert", callback_data=f"file_show_conv|{short_id}"),
+                InlineKeyboardButton("🤖 Ask AI", callback_data=f"file_show_ask|{short_id}")
+            ]
+        ])
+        await message.reply_text(f"📁 **File Received:** `{file_name}`\nWhat would you like to do?", reply_markup=keyboard)
 
 async def safe_edit_text(message, text, reply_markup=None):
     try:
@@ -267,6 +245,87 @@ async def button_callback(client, callback_query):
             pass
         await client.send_message(query_msg.chat.id, welcome_message, reply_markup=keyboard)
         
+    elif data.startswith("file_show_main|"):
+        _, short_id = data.split("|")
+        original_msg = url_cache.get(short_id)
+        if not original_msg:
+            await callback_query.answer("Session expired. Please send the file again.", show_alert=True)
+            return
+        file_name = "file"
+        if original_msg.photo: file_name = "image.jpg"
+        elif original_msg.video: file_name = original_msg.video.file_name or "video.mp4"
+        elif original_msg.audio or original_msg.voice: file_name = getattr(original_msg.audio or original_msg.voice, 'file_name', "audio.mp3")
+        elif original_msg.document: file_name = original_msg.document.file_name or "document"
+
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🔄 Convert", callback_data=f"file_show_conv|{short_id}"),
+                InlineKeyboardButton("🤖 Ask AI", callback_data=f"file_show_ask|{short_id}")
+            ]
+        ])
+        await safe_edit_text(query_msg, f"📁 **File Received:** `{file_name}`\nWhat would you like to do?", reply_markup=keyboard)
+
+    elif data.startswith("file_show_conv|"):
+        _, short_id = data.split("|")
+        original_msg = url_cache.get(short_id)
+        if not original_msg:
+            await callback_query.answer("Session expired. Please send the file again.", show_alert=True)
+            return
+            
+        mime_type = ""
+        file_name = ""
+        if original_msg.photo:
+            mime_type = "image/jpeg"
+        elif original_msg.video:
+            mime_type = original_msg.video.mime_type or "video/mp4"
+        elif original_msg.audio or original_msg.voice:
+            mime_type = getattr(original_msg.audio or original_msg.voice, 'mime_type', "audio/mpeg")
+        elif original_msg.document:
+            mime_type = original_msg.document.mime_type or ""
+            file_name = original_msg.document.file_name or ""
+
+        buttons = []
+        if mime_type.startswith('image/'):
+            buttons = [
+                [InlineKeyboardButton("PNG", callback_data=f"conv_img|{short_id}|png"), InlineKeyboardButton("JPG", callback_data=f"conv_img|{short_id}|jpg"), InlineKeyboardButton("WEBP", callback_data=f"conv_img|{short_id}|webp")]
+            ]
+        elif mime_type.startswith('video/'):
+            buttons = [
+                [InlineKeyboardButton("🎬 MP4", callback_data=f"conv_vid|{short_id}|mp4"), InlineKeyboardButton("🎬 MKV", callback_data=f"conv_vid|{short_id}|mkv"), InlineKeyboardButton("🎵 MP3", callback_data=f"conv_aud|{short_id}")]
+            ]
+        elif mime_type.startswith('audio/') or original_msg.voice:
+            buttons = [
+                [InlineKeyboardButton("🎵 MP3", callback_data=f"conv_aud|{short_id}")]
+            ]
+        else:
+            # Document conversions (PDF, DOCX, TXT)
+            buttons = [
+                [InlineKeyboardButton("📄 PDF", callback_data=f"conv_doc|{short_id}|pdf"), InlineKeyboardButton("📝 DOCX", callback_data=f"conv_doc|{short_id}|docx"), InlineKeyboardButton("📄 TXT", callback_data=f"conv_doc|{short_id}|txt")]
+            ]
+
+        buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"file_show_main|{short_id}")])
+        keyboard = InlineKeyboardMarkup(buttons)
+        await safe_edit_text(query_msg, "🔄 **Choose conversion type:**", reply_markup=keyboard)
+
+    elif data.startswith("file_show_ask|"):
+        _, short_id = data.split("|")
+        original_msg = url_cache.get(short_id)
+        if not original_msg:
+            await callback_query.answer("Session expired. Please send the file again.", show_alert=True)
+            return
+        file_name = "file"
+        if original_msg.photo: file_name = "image.jpg"
+        elif original_msg.video: file_name = original_msg.video.file_name or "video.mp4"
+        elif original_msg.audio or original_msg.voice: file_name = getattr(original_msg.audio or original_msg.voice, 'file_name', "audio.mp3")
+        elif original_msg.document: file_name = original_msg.document.file_name or "document"
+
+        from pyrogram.types import ForceReply
+        await client.send_message(
+            query_msg.chat.id,
+            f"🤖 **Ask Udom about this file:** `{file_name}` [ID:{short_id}]\n\nPlease reply directly to this message with what you want Udom to do for you:",
+            reply_markup=ForceReply(selective=True)
+        )
+
     elif data.startswith("url_show_main|"):
         _, short_id = data.split("|")
         url = url_cache.get(short_id)
@@ -550,6 +609,12 @@ async def button_callback(client, callback_query):
                 output_path = await asyncio.to_thread(convert_image_format, input_path, target_format)
                 send_method = client.send_photo
                 send_kwargs = {'photo': output_path} if output_path else {}
+            elif action == "conv_doc":
+                target_format = parts[2]
+                from converter import convert_document_format
+                output_path = await asyncio.to_thread(convert_document_format, input_path, target_format)
+                send_method = client.send_document
+                send_kwargs = {'document': output_path} if output_path else {}
                 
             if output_path and os.path.exists(output_path):
                 await safe_edit_text(query_msg, "Conversion complete! Uploading...")

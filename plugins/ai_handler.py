@@ -191,15 +191,43 @@ async def private_ai_chat(client: Client, message: Message):
         return
         
     prompt = text
-    if message.reply_to_message and "Ask Udom about this link:" in (message.reply_to_message.text or ""):
+    if message.reply_to_message and "Ask Udom about this file:" in (message.reply_to_message.text or ""):
         rep_text = message.reply_to_message.text
-        extracted_url = ""
-        for w in rep_text.split():
-            if "http://" in w or "https://" in w:
-                extracted_url = w.strip("`")
-                break
-        if extracted_url:
-            prompt = f"Context Link: {extracted_url}\n\nUser Request: {text}"
+        if "[ID:" in rep_text:
+            short_id = rep_text.split("[ID:")[1].split("]")[0]
+            from plugins.handlers import url_cache, parse_document, transcribe_audio_video, cleanup_file
+            original_msg = url_cache.get(short_id)
+            if original_msg:
+                processing_msg = await message.reply_text("🤔 Udom is analyzing your file...", reply_to_message_id=message.id)
+                try:
+                    file_path = await client.download_media(original_msg)
+                    file_content = ""
+                    if original_msg.photo:
+                        import requests
+                        with open(file_path, "rb") as f:
+                            ocr_res = requests.post("https://api.ocr.space/parse/image", files={"filename": f}, data={"apikey": "helloworld", "language": "eng"})
+                        ocr_data = ocr_res.json()
+                        if not ocr_data.get("IsErroredOnProcessing") and ocr_data.get("ParsedResults"):
+                            file_content = ocr_data["ParsedResults"][0].get("ParsedText", "").strip()
+                    elif original_msg.audio or original_msg.voice or original_msg.video:
+                        file_content = transcribe_audio_video(file_path)
+                    elif original_msg.document:
+                        mime_type = str(original_msg.document.mime_type or "")
+                        file_name = str(original_msg.document.file_name or "").lower()
+                        if mime_type.startswith("video/") or mime_type.startswith("audio/") or file_name.endswith(('.mp4', '.mkv', '.mp3', '.wav', '.ogg')):
+                            file_content = transcribe_audio_video(file_path)
+                        else:
+                            file_content = parse_document(file_path, mime_type)
+                            
+                    cleanup_file(file_path)
+                    prompt = f"User Request: {text}\n\nExtracted Content from File:\n{file_content if file_content else 'No readable text content'}"
+                    reply = await get_ai_response(message.chat.id, prompt)
+                    await processing_msg.edit_text(reply)
+                    return
+                except Exception as e:
+                    print(f"Error reading file for AI: {e}")
+                    await processing_msg.edit_text("❌ Failed to read file content for Udom.")
+                    return
 
     processing_msg = await message.reply_text("🤔 Thinking...", reply_to_message_id=message.id)
     reply = await get_ai_response(message.chat.id, prompt)
