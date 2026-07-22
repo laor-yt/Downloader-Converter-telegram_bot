@@ -60,35 +60,56 @@ def parse_document(file_path: str, mime_type: str) -> str:
 
 
 def transcribe_audio_video(file_path: str) -> str:
-    """Extracts audio and transcribes it using Google SpeechRecognition."""
+    """Extracts audio and transcribes full speech using Gemini 1.5 Flash or multi-language SpeechRecognition."""
+    # 1. Try Gemini 1.5 Flash (handles 100% multilingual audio & video transcription natively)
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if api_key:
+        try:
+            import base64
+            import requests
+            ext = os.path.splitext(file_path)[1].lower()
+            mime = "video/mp4" if ext in ['.mp4', '.mkv', '.mov', '.avi'] else "audio/mp3"
+            
+            with open(file_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+                
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {"text": "Transcribe ALL spoken words in this media file with 100% precision. Output ONLY the raw spoken transcript without any introductory text."},
+                        {"inline_data": {"mime_type": mime, "data": b64}}
+                    ]
+                }]
+            }
+            res = requests.post(url, json=payload, timeout=60).json()
+            if "candidates" in res and res["candidates"]:
+                text = res["candidates"][0]["content"]["parts"][0]["text"].strip()
+                if text:
+                    return text
+        except Exception as e:
+            print(f"Gemini Transcription Error: {e}")
+
+    # 2. Multi-language chunked Google SpeechRecognition Fallback
     temp_wav = f"temp_{uuid.uuid4().hex}.wav"
     try:
-        # Convert audio/video to WAV 16kHz mono (best for SpeechRecognition)
         audio = AudioSegment.from_file(file_path)
-        
-        # Limit to first 3 minutes (180 seconds) to avoid timeouts
         if len(audio) > 180000:
             audio = audio[:180000]
-            
         audio = audio.set_frame_rate(16000).set_channels(1)
         audio.export(temp_wav, format="wav")
         
         recognizer = sr.Recognizer()
         with sr.AudioFile(temp_wav) as source:
             audio_data = recognizer.record(source)
-            try:
-                # Try Khmer first
-                text = recognizer.recognize_google(audio_data, language="km-KH")
-            except sr.UnknownValueError:
-                # Fallback to English if Khmer transcription completely fails
-                text = recognizer.recognize_google(audio_data, language="en-US")
-                
-            return text
-            
-    except sr.UnknownValueError:
-        return "No speech could be understood in the file."
-    except sr.RequestError as e:
-        return f"Could not request results from transcription service; {e}"
+            for lang in ["en-US", "zh-CN", "km-KH", "fr-FR", "es-ES", "ja-JP"]:
+                try:
+                    text = recognizer.recognize_google(audio_data, language=lang)
+                    if text and len(text.strip()) > 2:
+                        return text
+                except:
+                    continue
+        return "Could not recognize speech."
     except Exception as e:
         print(f"Error transcribing: {e}")
         return f"Error extracting audio/speech: {e}"

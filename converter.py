@@ -192,14 +192,38 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
     from gtts import gTTS
     tts_lang = 'km' if target_lang.startswith('km') else ('zh-CN' if target_lang.startswith('zh') else target_lang[:2])
     
-    tts_output = os.path.join(temp_dir, f"{uuid.uuid4()}_tts.mp3")
+    raw_tts_output = os.path.join(temp_dir, f"{uuid.uuid4()}_raw_tts.mp3")
+    synced_tts_output = os.path.join(temp_dir, f"{uuid.uuid4()}_synced_tts.mp3")
     try:
         tts = gTTS(text=translated_text, lang=tts_lang, slow=False)
-        tts.save(tts_output)
+        tts.save(raw_tts_output)
     except Exception as e:
         print(f"gTTS Error: {e}")
         return f"ERROR: Failed to generate TTS voice: {e}"
         
+    # Sync TTS voice duration to match original video duration using FFmpeg atempo filter
+    final_audio_track = raw_tts_output
+    if is_video:
+        orig_duration = get_video_duration(input_path)
+        tts_duration = get_video_duration(raw_tts_output)
+        
+        if orig_duration > 0 and tts_duration > 0:
+            speed_ratio = tts_duration / orig_duration
+            speed_ratio = max(0.5, min(2.0, speed_ratio))
+            try:
+                (
+                    ffmpeg
+                    .input(raw_tts_output)
+                    .filter('atempo', speed_ratio)
+                    .output(synced_tts_output)
+                    .overwrite_output()
+                    .run(capture_stdout=True, capture_stderr=True)
+                )
+                if os.path.exists(synced_tts_output) and os.path.getsize(synced_tts_output) > 0:
+                    final_audio_track = synced_tts_output
+            except Exception as e_tempo:
+                print(f"Atempo Sync Error: {e_tempo}")
+
     if progress_callback: progress_callback("🎬 Merging translated vocal audio with video...")
     output_ext = "mp4" if is_video else "mp3"
     output_path = os.path.join(temp_dir, f"{uuid.uuid4()}_dubbed.{output_ext}")
@@ -210,7 +234,7 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
                 ffmpeg
                 .output(
                     ffmpeg.input(input_path).video,
-                    ffmpeg.input(tts_output).audio,
+                    ffmpeg.input(final_audio_track).audio,
                     output_path,
                     vcodec='copy',
                     acodec='aac'
@@ -222,7 +246,11 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
             print(f"FFmpeg Merge Error: {e}")
             res = None
     else:
-        res = tts_output
+        res = final_audio_track
+        
+    cleanup_file(raw_tts_output)
+    if os.path.exists(synced_tts_output) and final_audio_track != synced_tts_output:
+        cleanup_file(synced_tts_output)
         
     return res
 
