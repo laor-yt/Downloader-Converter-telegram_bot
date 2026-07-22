@@ -50,14 +50,24 @@ def download_media(url, is_audio=False, progress_callback=None):
         },
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios', 'android', 'tv']
+                'player_client': ['android', 'web', 'tv']
             }
         },
     }
     
-    # Use cookies file if available (helps bypass YouTube bot detection on cloud servers)
+    # Use cookies from Environment Variable or secret file
+    env_cookies = os.environ.get("YOUTUBE_COOKIES")
     cookies_path = '/etc/secrets/cookies.txt'
-    if os.path.exists(cookies_path):
+    if env_cookies:
+        writable_cookies_path = os.path.join(temp_dir, 'env_cookies.txt')
+        try:
+            with open(writable_cookies_path, 'w', encoding='utf-8') as cf:
+                cf.write(env_cookies)
+            ydl_opts['cookiefile'] = writable_cookies_path
+            print(f"✅ Applying YOUTUBE_COOKIES environment variable to yt-dlp...")
+        except Exception as e:
+            print(f"⚠️ Error writing env cookies: {e}")
+    elif os.path.exists(cookies_path):
         import shutil
         writable_cookies_path = os.path.join(temp_dir, 'cookies.txt')
         try:
@@ -68,7 +78,7 @@ def download_media(url, is_audio=False, progress_callback=None):
             print(f"⚠️ Error copying cookies file: {e}")
             ydl_opts['cookiefile'] = cookies_path # fallback
     else:
-        print(f"⚠️ No cookies file found at {cookies_path}. YouTube might block downloads.")
+        print(f"⚠️ No cookies file or YOUTUBE_COOKIES env found. Using bot-bypass clients.")
     
     MAX_SIZE_BYTES = 1950 * 1024 * 1024  # 1950MB safety limit
 
