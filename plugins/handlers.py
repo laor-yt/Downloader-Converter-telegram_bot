@@ -689,14 +689,13 @@ async def button_callback(client, callback_query):
     elif data.startswith("recap_url|"):
         parts = data.split("|")
         short_id = parts[1]
-        mode = parts[2]
-        lang = parts[3]
+        lang = parts[2]
         url = url_cache.get(short_id)
         if not url:
             await safe_edit_text(query_msg, "Link expired or invalid. Please send it again.")
             return
 
-        await safe_edit_text(query_msg, f"🧠 Analyzing video content from link... `{url}`")
+        await safe_edit_text(query_msg, f"🧠 Analyzing video content & generating Voiceover Recap... `{url}`")
         last_update_time = time.time()
         last_text = ""
         loop = asyncio.get_running_loop()
@@ -715,11 +714,11 @@ async def button_callback(client, callback_query):
             
             if input_path and os.path.exists(input_path):
                 from converter import recap_video_audio
-                recap_text, media_out = await asyncio.to_thread(recap_video_audio, input_path, lang, True, (mode == 'voice'), progress_cb)
+                recap_text, media_out = await asyncio.to_thread(recap_video_audio, input_path, lang, True, True, progress_cb)
                 
                 await safe_edit_text(query_msg, recap_text)
                 if media_out and os.path.exists(media_out):
-                    await client.send_video(chat_id=query_msg.chat.id, video=media_out, caption="🎙 **Voiceover Recap Video**", supports_streaming=True)
+                    await client.send_video(chat_id=query_msg.chat.id, video=media_out, caption=f"🎙 **Voiceover Recap Video ({lang.upper()})**", supports_streaming=True)
                     cleanup_file(media_out)
                 cleanup_file(input_path)
             else:
@@ -804,18 +803,17 @@ async def button_callback(client, callback_query):
                     send_method = client.send_audio
                     send_kwargs = {'audio': output_path} if output_path and not str(output_path).startswith("ERROR:") else {}
             elif action == "recap_file":
-                mode = parts[2]
-                lang = parts[3]
+                lang = parts[2]
                 is_video = bool(cached_msg.video or (cached_msg.document and str(cached_msg.document.mime_type or "").startswith("video/")))
                 from converter import recap_video_audio
-                recap_text, media_out = await asyncio.to_thread(recap_video_audio, input_path, lang, is_video, (mode == 'voice'), progress_callback)
+                recap_text, media_out = await asyncio.to_thread(recap_video_audio, input_path, lang, is_video, True, progress_callback)
                 
                 await safe_edit_text(query_msg, recap_text)
                 if media_out and os.path.exists(media_out):
                     if is_video:
-                        await client.send_video(chat_id=query_msg.chat.id, video=media_out, caption="🎙 **Voiceover Recap Video**", supports_streaming=True)
+                        await client.send_video(chat_id=query_msg.chat.id, video=media_out, caption=f"🎙 **Voiceover Recap Video ({lang.upper()})**", supports_streaming=True)
                     else:
-                        await client.send_audio(chat_id=query_msg.chat.id, audio=media_out, caption="🎙 **Voiceover Recap Audio**")
+                        await client.send_audio(chat_id=query_msg.chat.id, audio=media_out, caption=f"🎙 **Voiceover Recap Audio ({lang.upper()})**")
                     cleanup_file(media_out)
                 cleanup_file(input_path)
                 return
