@@ -389,6 +389,7 @@ async def button_callback(client, callback_query):
                 InlineKeyboardButton("🎵 Download Audio", callback_data=f"dl_aud|{short_id}")
             ],
             [
+                InlineKeyboardButton("🎙 Voice Dub & Translate", callback_data=f"url_show_dub|{short_id}"),
                 InlineKeyboardButton("✂️ Clip Video", callback_data=f"url_show_clip|{short_id}")
             ],
             [
@@ -396,6 +397,27 @@ async def button_callback(client, callback_query):
             ]
         ])
         await safe_edit_text(query_msg, f"📥 **Download Options for:** `{url}`", reply_markup=keyboard)
+
+    elif data.startswith("url_show_dub|"):
+        _, short_id = data.split("|")
+        url = url_cache.get(short_id)
+        if not url:
+            await callback_query.answer("Session expired. Please send the link again.", show_alert=True)
+            return
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🇰🇭 Khmer", callback_data=f"url_dub_lang|{short_id}|km"),
+                InlineKeyboardButton("🇬🇧 English", callback_data=f"url_dub_lang|{short_id}|en"),
+                InlineKeyboardButton("🇨🇳 Chinese", callback_data=f"url_dub_lang|{short_id}|zh")
+            ],
+            [
+                InlineKeyboardButton("🇫🇷 French", callback_data=f"url_dub_lang|{short_id}|fr"),
+                InlineKeyboardButton("🇪🇸 Spanish", callback_data=f"url_dub_lang|{short_id}|es"),
+                InlineKeyboardButton("🇯🇵 Japanese", callback_data=f"url_dub_lang|{short_id}|ja")
+            ],
+            [InlineKeyboardButton("🔙 Back", callback_data=f"url_show_dl|{short_id}")]
+        ])
+        await safe_edit_text(query_msg, f"🎙 **Choose target language for Voice Dubbing:**\n`{url}`", reply_markup=keyboard)
 
     elif data.startswith("url_show_clip|"):
         _, short_id = data.split("|")
@@ -601,9 +623,65 @@ async def button_callback(client, callback_query):
                 await safe_edit_text(query_msg, f"❌ Upload failed: {error_str}")
             finally:
                 cleanup_file(filepath)
-        else:
-            await safe_edit_text(query_msg, "❌ Failed to download the media. The link may be unsupported or geo-restricted.")
+    elif data.startswith("url_dub_lang|"):
+        parts = data.split("|")
+        short_id = parts[1]
+        target_lang = parts[2]
+        url = url_cache.get(short_id)
+        if not url:
+            await safe_edit_text(query_msg, "Link expired or invalid. Please send it again.")
+            return
+
+        await safe_edit_text(query_msg, f"📥 Downloading video from link... `{url}`")
+        
+        last_update_time = time.time()
+        last_text = ""
+        loop = asyncio.get_running_loop()
+        
+        def progress_cb(text):
+            nonlocal last_update_time, last_text
+            current_time = time.time()
+            if current_time - last_update_time > 2.0 and text != last_text:
+                last_update_time = current_time
+                last_text = text
+                asyncio.run_coroutine_threadsafe(safe_edit_text(query_msg, text), loop)
+
+        try:
+            dl_res = await asyncio.to_thread(download_media, url, False, progress_cb)
+            input_path = dl_res[0] if isinstance(dl_res, tuple) else dl_res
             
+            if input_path and os.path.exists(input_path):
+                from converter import translate_and_dub_media
+                output_path = await asyncio.to_thread(translate_and_dub_media, input_path, target_lang, True, progress_cb)
+                
+                if output_path and isinstance(output_path, str) and not output_path.startswith("ERROR:") and os.path.exists(output_path):
+                    await safe_edit_text(query_msg, "Dubbing complete! Uploading translated video...")
+                    
+                    def pyrogram_upload_progress(current, total):
+                        nonlocal last_update_time, last_text
+                        current_time = time.time()
+                        if current_time - last_update_time > 2.0:
+                            last_update_time = current_time
+                            percent = current * 100 / total
+                            text = f"Uploading... {percent:.1f}% ({current/1024/1024:.1f}MB / {total/1024/1024:.1f}MB)"
+                            if text != last_text:
+                                last_text = text
+                                asyncio.run_coroutine_threadsafe(safe_edit_text(query_msg, text), loop)
+                                
+                    await client.send_video(chat_id=query_msg.chat.id, video=output_path, supports_streaming=True, progress=pyrogram_upload_progress)
+                    cleanup_file(output_path)
+                    await safe_edit_text(query_msg, "Voice dubbing from link complete! ✅")
+                else:
+                    err_msg = output_path if isinstance(output_path, str) else "Failed to dub media."
+                    await safe_edit_text(query_msg, f"❌ {err_msg}")
+                    
+                cleanup_file(input_path)
+            else:
+                await safe_edit_text(query_msg, "❌ Failed to download video from link for dubbing.")
+        except Exception as e:
+            print(f"URL Dubbing error: {e}")
+            await safe_edit_text(query_msg, f"❌ Dubbing failed: {e}")
+
     elif data.startswith("conv_") or data.startswith("dub_lang|"):
         parts = data.split('|')
         action = parts[0]
