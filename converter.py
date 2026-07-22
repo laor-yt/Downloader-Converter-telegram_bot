@@ -254,6 +254,115 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
         
     return res
 
+def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=False, progress_callback=None):
+    """
+    1. Transcribes full speech in media.
+    2. Uses Udom AI to generate a concise, structured Recap / Summary of the video/audio.
+    3. If voiceover=True, converts the recap into spoken TTS voice and merges it into video/audio.
+    """
+    temp_dir = get_temp_dir()
+    
+    from plugins.document_parser import transcribe_audio_video
+    if progress_callback: progress_callback("⏳ Transcribing media content for AI Recap...")
+    transcript = transcribe_audio_video(input_path)
+    
+    if not transcript or "Error" in transcript or "Unsupported" in transcript or len(transcript.strip()) < 3:
+        return "ERROR: Could not extract speech from media to generate recap.", None
+        
+    lang_names = {'km': 'Khmer', 'en': 'English', 'zh': 'Chinese (Mandarin)', 'fr': 'French', 'es': 'Spanish', 'ja': 'Japanese'}
+    target_lang_name = lang_names.get(target_lang[:2], 'Khmer')
+    
+    if progress_callback: progress_callback(f"🧠 Generating AI Video Recap in {target_lang_name}...")
+    
+    import asyncio
+    from plugins.ai_handler import get_ai_response
+    prompt = (
+        f"You are Udom AI. Please create a clear, engaging, and concise Recap & Summary of the following video/audio transcript in {target_lang_name}.\n"
+        f"Include:\n"
+        f"1. 📌 Key Highlights & Main Points\n"
+        f"2. 💡 Summary of Story / Discussion\n"
+        f"3. 🎯 Main Takeaways\n\n"
+        f"Transcript:\n{transcript}"
+    )
+    
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+            recap_text = asyncio.run_coroutine_threadsafe(get_ai_response(0, prompt), loop).result(45)
+        except RuntimeError:
+            recap_text = asyncio.run(get_ai_response(0, prompt))
+    except Exception as e:
+        print(f"AI Recap Error: {e}")
+        recap_text = f"Failed to generate recap: {e}"
+        
+    if not voiceover:
+        return recap_text, None
+        
+    # Generate Voiceover Recap Video/Audio
+    if progress_callback: progress_callback("🎙 Generating Voiceover Recap audio...")
+    from gtts import gTTS
+    tts_lang = 'km' if target_lang.startswith('km') else ('zh-CN' if target_lang.startswith('zh') else target_lang[:2])
+    
+    tts_speech = recap_text.replace("*", "").replace("#", "").replace("-", "").strip()
+    raw_tts = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_raw.mp3")
+    synced_tts = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_synced.mp3")
+    
+    try:
+        tts = gTTS(text=tts_speech, lang=tts_lang, slow=False)
+        tts.save(raw_tts)
+    except Exception as e:
+        print(f"Recap TTS Error: {e}")
+        return recap_text, None
+        
+    final_audio = raw_tts
+    if is_video:
+        orig_dur = get_video_duration(input_path)
+        tts_dur = get_video_duration(raw_tts)
+        if orig_dur > 0 and tts_dur > 0:
+            ratio = max(0.5, min(2.0, tts_dur / orig_dur))
+            try:
+                (
+                    ffmpeg
+                    .input(raw_tts)
+                    .filter('atempo', ratio)
+                    .output(synced_tts)
+                    .overwrite_output()
+                    .run(capture_stdout=True, capture_stderr=True)
+                )
+                if os.path.exists(synced_tts) and os.path.getsize(synced_tts) > 0:
+                    final_audio = synced_tts
+            except Exception as e_tempo:
+                print(f"Recap Tempo Sync Error: {e_tempo}")
+                
+    output_ext = "mp4" if is_video else "mp3"
+    output_path = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_dubbed.{output_ext}")
+    
+    if is_video:
+        try:
+            stream = (
+                ffmpeg
+                .output(
+                    ffmpeg.input(input_path).video,
+                    ffmpeg.input(final_audio).audio,
+                    output_path,
+                    vcodec='copy',
+                    acodec='aac'
+                )
+                .overwrite_output()
+            )
+            res_media = _run_ffmpeg_with_progress(stream, output_path, progress_callback)
+        except Exception as e:
+            print(f"FFmpeg Recap Merge Error: {e}")
+            res_media = None
+    else:
+        res_media = final_audio
+        
+    cleanup_file(raw_tts)
+    if os.path.exists(synced_tts) and final_audio != synced_tts:
+        cleanup_file(synced_tts)
+        
+    return recap_text, res_media
+
 def get_video_duration(file_path):
     try:
         probe = ffmpeg.probe(file_path)

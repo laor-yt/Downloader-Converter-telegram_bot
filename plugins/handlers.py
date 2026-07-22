@@ -293,12 +293,13 @@ async def button_callback(client, callback_query):
         elif mime_type.startswith('video/'):
             buttons = [
                 [InlineKeyboardButton("🎬 MP4", callback_data=f"conv_vid|{short_id}|mp4"), InlineKeyboardButton("🎬 MKV", callback_data=f"conv_vid|{short_id}|mkv"), InlineKeyboardButton("🎵 MP3", callback_data=f"conv_aud|{short_id}")],
-                [InlineKeyboardButton("🎙 Voice Dub & Translate", callback_data=f"file_show_dub|{short_id}"), InlineKeyboardButton("✂️ Clip Video", callback_data=f"file_show_clip|{short_id}")]
+                [InlineKeyboardButton("🎙 Voice Dub & Translate", callback_data=f"file_show_dub|{short_id}"), InlineKeyboardButton("✂️ Clip Video", callback_data=f"file_show_clip|{short_id}")],
+                [InlineKeyboardButton("📝 AI Video Recap", callback_data=f"file_show_recap|{short_id}")]
             ]
         elif mime_type.startswith('audio/') or original_msg.voice:
             buttons = [
                 [InlineKeyboardButton("🎵 MP3", callback_data=f"conv_aud|{short_id}")],
-                [InlineKeyboardButton("🎙 Voice Dub & Translate", callback_data=f"file_show_dub|{short_id}")]
+                [InlineKeyboardButton("🎙 Voice Dub & Translate", callback_data=f"file_show_dub|{short_id}"), InlineKeyboardButton("📝 AI Audio Recap", callback_data=f"file_show_recap|{short_id}")]
             ]
         else:
             # Document conversions (PDF, DOCX, TXT)
@@ -391,6 +392,9 @@ async def button_callback(client, callback_query):
             [
                 InlineKeyboardButton("🎙 Voice Dub & Translate", callback_data=f"url_show_dub|{short_id}"),
                 InlineKeyboardButton("✂️ Clip Video", callback_data=f"url_show_clip|{short_id}")
+            ],
+            [
+                InlineKeyboardButton("📝 AI Video Recap", callback_data=f"url_show_recap|{short_id}")
             ],
             [
                 InlineKeyboardButton("🔙 Back", callback_data=f"url_show_main|{short_id}")
@@ -682,7 +686,49 @@ async def button_callback(client, callback_query):
             print(f"URL Dubbing error: {e}")
             await safe_edit_text(query_msg, f"❌ Dubbing failed: {e}")
 
-    elif data.startswith("conv_") or data.startswith("dub_lang|"):
+    elif data.startswith("recap_url|"):
+        parts = data.split("|")
+        short_id = parts[1]
+        mode = parts[2]
+        lang = parts[3]
+        url = url_cache.get(short_id)
+        if not url:
+            await safe_edit_text(query_msg, "Link expired or invalid. Please send it again.")
+            return
+
+        await safe_edit_text(query_msg, f"🧠 Analyzing video content from link... `{url}`")
+        last_update_time = time.time()
+        last_text = ""
+        loop = asyncio.get_running_loop()
+        
+        def progress_cb(text):
+            nonlocal last_update_time, last_text
+            current_time = time.time()
+            if current_time - last_update_time > 2.0 and text != last_text:
+                last_update_time = current_time
+                last_text = text
+                asyncio.run_coroutine_threadsafe(safe_edit_text(query_msg, text), loop)
+
+        try:
+            dl_res = await asyncio.to_thread(download_media, url, False, progress_cb)
+            input_path = dl_res[0] if isinstance(dl_res, tuple) else dl_res
+            
+            if input_path and os.path.exists(input_path):
+                from converter import recap_video_audio
+                recap_text, media_out = await asyncio.to_thread(recap_video_audio, input_path, lang, True, (mode == 'voice'), progress_cb)
+                
+                await safe_edit_text(query_msg, recap_text)
+                if media_out and os.path.exists(media_out):
+                    await client.send_video(chat_id=query_msg.chat.id, video=media_out, caption="🎙 **Voiceover Recap Video**", supports_streaming=True)
+                    cleanup_file(media_out)
+                cleanup_file(input_path)
+            else:
+                await safe_edit_text(query_msg, "❌ Failed to download video for recap.")
+        except Exception as e:
+            print(f"URL Recap error: {e}")
+            await safe_edit_text(query_msg, f"❌ Recap failed: {e}")
+
+    elif data.startswith("conv_") or data.startswith("dub_lang|") or data.startswith("recap_file|"):
         parts = data.split('|')
         action = parts[0]
         short_id = parts[1]
@@ -757,6 +803,22 @@ async def button_callback(client, callback_query):
                 else:
                     send_method = client.send_audio
                     send_kwargs = {'audio': output_path} if output_path and not str(output_path).startswith("ERROR:") else {}
+            elif action == "recap_file":
+                mode = parts[2]
+                lang = parts[3]
+                is_video = bool(cached_msg.video or (cached_msg.document and str(cached_msg.document.mime_type or "").startswith("video/")))
+                from converter import recap_video_audio
+                recap_text, media_out = await asyncio.to_thread(recap_video_audio, input_path, lang, is_video, (mode == 'voice'), progress_callback)
+                
+                await safe_edit_text(query_msg, recap_text)
+                if media_out and os.path.exists(media_out):
+                    if is_video:
+                        await client.send_video(chat_id=query_msg.chat.id, video=media_out, caption="🎙 **Voiceover Recap Video**", supports_streaming=True)
+                    else:
+                        await client.send_audio(chat_id=query_msg.chat.id, audio=media_out, caption="🎙 **Voiceover Recap Audio**")
+                    cleanup_file(media_out)
+                cleanup_file(input_path)
+                return
                 
             if output_path and os.path.exists(output_path):
                 await safe_edit_text(query_msg, "Conversion complete! Uploading...")
