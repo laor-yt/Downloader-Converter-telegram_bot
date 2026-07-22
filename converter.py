@@ -150,3 +150,78 @@ def convert_document_format(input_path, output_format='pdf'):
     except Exception as e:
         print(f"Error converting document: {e}")
         return None
+
+def translate_and_dub_media(input_path, target_lang='km', is_video=True, progress_callback=None):
+    """
+    1. Transcribes speech in video/audio to text.
+    2. Translates text into target_lang (Khmer, English, Chinese, French, Spanish, Japanese, etc.).
+    3. Generates new vocal dubbing audio using gTTS.
+    4. Merges/replaces video audio track with the translated voice dubbing.
+    """
+    temp_dir = get_temp_dir()
+    
+    from plugins.document_parser import transcribe_audio_video
+    if progress_callback: progress_callback("⏳ Transcribing speech from media...")
+    transcript = transcribe_audio_video(input_path)
+    
+    if not transcript or "Error" in transcript or "Unsupported" in transcript or len(transcript.strip()) < 3:
+        return "ERROR: Could not recognize speech in media."
+        
+    lang_names = {'km': 'Khmer', 'en': 'English', 'zh': 'Chinese (Mandarin)', 'fr': 'French', 'es': 'Spanish', 'ja': 'Japanese', 'ko': 'Korean', 'de': 'German'}
+    target_lang_name = lang_names.get(target_lang[:2], 'Khmer')
+    
+    if progress_callback: progress_callback(f"🌐 Translating speech to {target_lang_name}...")
+    
+    import asyncio
+    from plugins.ai_handler import get_ai_response
+    prompt = f"Translate the following spoken transcript accurately into {target_lang_name}. Output ONLY the raw translated speech text for voiceover narration and NOTHING else:\n\n{transcript}"
+    
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+            translated_text = asyncio.run_coroutine_threadsafe(get_ai_response(0, prompt), loop).result(40)
+        except RuntimeError:
+            translated_text = asyncio.run(get_ai_response(0, prompt))
+    except Exception as e:
+        print(f"AI Translation Error: {e}")
+        translated_text = transcript
+        
+    translated_text = translated_text.replace("Here is the translation:", "").replace("Translation:", "").strip()
+    
+    if progress_callback: progress_callback("🎙 Generating translated voiceover (dubbing)...")
+    from gtts import gTTS
+    tts_lang = 'km' if target_lang.startswith('km') else ('zh-CN' if target_lang.startswith('zh') else target_lang[:2])
+    
+    tts_output = os.path.join(temp_dir, f"{uuid.uuid4()}_tts.mp3")
+    try:
+        tts = gTTS(text=translated_text, lang=tts_lang, slow=False)
+        tts.save(tts_output)
+    except Exception as e:
+        print(f"gTTS Error: {e}")
+        return f"ERROR: Failed to generate TTS voice: {e}"
+        
+    if progress_callback: progress_callback("🎬 Merging translated vocal audio with video...")
+    output_ext = "mp4" if is_video else "mp3"
+    output_path = os.path.join(temp_dir, f"{uuid.uuid4()}_dubbed.{output_ext}")
+    
+    if is_video:
+        try:
+            stream = (
+                ffmpeg
+                .output(
+                    ffmpeg.input(input_path).video,
+                    ffmpeg.input(tts_output).audio,
+                    output_path,
+                    vcodec='copy',
+                    acodec='aac'
+                )
+                .overwrite_output()
+            )
+            res = _run_ffmpeg_with_progress(stream, output_path, progress_callback)
+        except Exception as e:
+            print(f"FFmpeg Merge Error: {e}")
+            res = None
+    else:
+        res = tts_output
+        
+    return res

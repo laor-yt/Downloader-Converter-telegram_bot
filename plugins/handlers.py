@@ -292,11 +292,13 @@ async def button_callback(client, callback_query):
             ]
         elif mime_type.startswith('video/'):
             buttons = [
-                [InlineKeyboardButton("🎬 MP4", callback_data=f"conv_vid|{short_id}|mp4"), InlineKeyboardButton("🎬 MKV", callback_data=f"conv_vid|{short_id}|mkv"), InlineKeyboardButton("🎵 MP3", callback_data=f"conv_aud|{short_id}")]
+                [InlineKeyboardButton("🎬 MP4", callback_data=f"conv_vid|{short_id}|mp4"), InlineKeyboardButton("🎬 MKV", callback_data=f"conv_vid|{short_id}|mkv"), InlineKeyboardButton("🎵 MP3", callback_data=f"conv_aud|{short_id}")],
+                [InlineKeyboardButton("🎙 Voice Dub & Translate", callback_data=f"file_show_dub|{short_id}")]
             ]
         elif mime_type.startswith('audio/') or original_msg.voice:
             buttons = [
-                [InlineKeyboardButton("🎵 MP3", callback_data=f"conv_aud|{short_id}")]
+                [InlineKeyboardButton("🎵 MP3", callback_data=f"conv_aud|{short_id}")],
+                [InlineKeyboardButton("🎙 Voice Dub & Translate", callback_data=f"file_show_dub|{short_id}")]
             ]
         else:
             # Document conversions (PDF, DOCX, TXT)
@@ -307,6 +309,27 @@ async def button_callback(client, callback_query):
         buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"file_show_main|{short_id}")])
         keyboard = InlineKeyboardMarkup(buttons)
         await safe_edit_text(query_msg, "🔄 **Choose conversion type:**", reply_markup=keyboard)
+
+    elif data.startswith("file_show_dub|"):
+        _, short_id = data.split("|")
+        original_msg = url_cache.get(short_id)
+        if not original_msg:
+            await callback_query.answer("Session expired. Please send the file again.", show_alert=True)
+            return
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🇰🇭 Khmer", callback_data=f"dub_lang|{short_id}|km"),
+                InlineKeyboardButton("🇬🇧 English", callback_data=f"dub_lang|{short_id}|en"),
+                InlineKeyboardButton("🇨🇳 Chinese", callback_data=f"dub_lang|{short_id}|zh")
+            ],
+            [
+                InlineKeyboardButton("🇫🇷 French", callback_data=f"dub_lang|{short_id}|fr"),
+                InlineKeyboardButton("🇪🇸 Spanish", callback_data=f"dub_lang|{short_id}|es"),
+                InlineKeyboardButton("🇯🇵 Japanese", callback_data=f"dub_lang|{short_id}|ja")
+            ],
+            [InlineKeyboardButton("🔙 Back", callback_data=f"file_show_conv|{short_id}")]
+        ])
+        await safe_edit_text(query_msg, "🎙 **Choose target language for Voice Dubbing:**", reply_markup=keyboard)
 
     elif data.startswith("file_show_ask|"):
         _, short_id = data.split("|")
@@ -616,6 +639,17 @@ async def button_callback(client, callback_query):
                 output_path = await asyncio.to_thread(convert_document_format, input_path, target_format)
                 send_method = client.send_document
                 send_kwargs = {'document': output_path} if output_path else {}
+            elif action == "dub_lang":
+                target_lang = parts[2]
+                is_video = bool(cached_msg.video or (cached_msg.document and str(cached_msg.document.mime_type or "").startswith("video/")))
+                from converter import translate_and_dub_media
+                output_path = await asyncio.to_thread(translate_and_dub_media, input_path, target_lang, is_video, progress_callback)
+                if is_video:
+                    send_method = client.send_video
+                    send_kwargs = {'video': output_path, 'supports_streaming': True} if output_path and not str(output_path).startswith("ERROR:") else {}
+                else:
+                    send_method = client.send_audio
+                    send_kwargs = {'audio': output_path} if output_path and not str(output_path).startswith("ERROR:") else {}
                 
             if output_path and os.path.exists(output_path):
                 await safe_edit_text(query_msg, "Conversion complete! Uploading...")
