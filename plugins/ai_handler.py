@@ -156,6 +156,36 @@ async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):
                 chat_history[chat_id].pop()
                 return f"Sorry, I am having trouble thinking right now. Error: {str(e3)}"
 
+class LiveTimer:
+    def __init__(self, message, base_text="Processing..."):
+        self.message = message
+        self.base_text = base_text
+        self.start_time = time.time()
+        self.stop_event = asyncio.Event()
+        self.task = None
+
+    async def _timer_loop(self):
+        while not self.stop_event.is_set():
+            await asyncio.sleep(1.5)
+            if self.stop_event.is_set():
+                break
+            elapsed = int(time.time() - self.start_time)
+            mins, secs = divmod(elapsed, 60)
+            timer_text = f"⏱ [{mins:02d}:{secs:02d}] {self.base_text}"
+            try:
+                await self.message.edit_text(timer_text)
+            except:
+                pass
+
+    async def __aenter__(self):
+        self.task = asyncio.create_task(self._timer_loop())
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        self.stop_event.set()
+        if self.task:
+            self.task.cancel()
+
 @Client.on_message(filters.command("ask"), group=1)
 async def ask_command(client: Client, message: Message):
     if len(message.command) < 2:
@@ -165,9 +195,10 @@ async def ask_command(client: Client, message: Message):
         
     prompt = message.text.split(None, 1)[1]
     
-    processing_msg = await message.reply_text("🤔 Thinking...")
-    reply = await get_ai_response(message.chat.id, prompt)
-    
+    processing_msg = await message.reply_text("⏱ [00:00] 🤔 Thinking...")
+    async with LiveTimer(processing_msg, "🤔 Thinking..."):
+        reply = await get_ai_response(message.chat.id, prompt)
+        
     await send_ai_reply_or_photo(message, processing_msg, reply, prompt_text=prompt)
 def analyze_media_with_gemini(file_path, prompt, mime_type="image/jpeg"):
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -270,9 +301,10 @@ async def image_command(client: Client, message: Message):
     raw_prompt = message.text.split(None, 1)[1]
     image_url = clean_and_generate_image_url(raw_prompt)
     
-    processing_msg = await message.reply_text("🎨 Drawing image with FLUX AI...")
+    processing_msg = await message.reply_text("⏱ [00:00] 🎨 Drawing image with FLUX AI...")
     try:
-        await message.reply_photo(image_url, caption=f"🎨 `{raw_prompt}`")
+        async with LiveTimer(processing_msg, "🎨 Drawing image with FLUX AI..."):
+            await message.reply_photo(image_url, caption=f"🎨 `{raw_prompt}`")
         await processing_msg.delete()
     except Exception as e:
         print(f"Error in image_command: {e}")
@@ -500,15 +532,17 @@ async def private_ai_chat(client: Client, message: Message):
     lower_text = text.lower().strip()
     image_trigger_keywords = ["draw ", "generat image", "generate image", "create image", "make image", "generate photo", "create photo", "make photo", "draw a ", "draw me "]
     if any(lower_text.startswith(kw) for kw in image_trigger_keywords):
-        processing_msg = await message.reply_text("🎨 Drawing image with FLUX AI...", reply_to_message_id=message.id)
+        processing_msg = await message.reply_text("⏱ [00:00] 🎨 Drawing image with FLUX AI...", reply_to_message_id=message.id)
         img_url = clean_and_generate_image_url(text)
         try:
-            await message.reply_photo(img_url, caption=f"🎨 `{text}`")
+            async with LiveTimer(processing_msg, "🎨 Drawing image with FLUX AI..."):
+                await message.reply_photo(img_url, caption=f"🎨 `{text}`")
             await processing_msg.delete()
             return
         except Exception as e:
             print(f"Error in direct drawing request: {e}")
 
-    processing_msg = await message.reply_text("🤔 Thinking...", reply_to_message_id=message.id)
-    reply = await get_ai_response(message.chat.id, prompt)
+    processing_msg = await message.reply_text("⏱ [00:00] 🤔 Thinking...", reply_to_message_id=message.id)
+    async with LiveTimer(processing_msg, "🤔 Thinking..."):
+        reply = await get_ai_response(message.chat.id, prompt)
     await send_ai_reply_or_photo(message, processing_msg, reply, prompt_text=text)

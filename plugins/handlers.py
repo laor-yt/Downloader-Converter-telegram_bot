@@ -198,7 +198,27 @@ async def handle_media(client, message):
         ])
         await message.reply_text(f"📁 **File Received:** `{file_name}`\nWhat would you like to do?", reply_markup=keyboard)
 
+message_start_times = {}
+
 async def safe_edit_text(message, text, reply_markup=None):
+    msg_id = getattr(message, 'id', None)
+    if msg_id:
+        if msg_id not in message_start_times:
+            message_start_times[msg_id] = time.time()
+            
+        start_time = message_start_times[msg_id]
+        elapsed = int(time.time() - start_time)
+        mins, secs = divmod(elapsed, 60)
+        
+        is_done = "Done!" in text or "complete!" in text or "❌" in text or "Received:" in text or "Detected:" in text
+        if not is_done and elapsed > 0:
+            time_tag = f"⏱ [{mins:02d}:{secs:02d}] "
+            if not text.startswith("⏱"):
+                text = f"{time_tag}{text}"
+                
+        if is_done:
+            message_start_times.pop(msg_id, None)
+
     try:
         if reply_markup:
             await message.edit_text(text, reply_markup=reply_markup)
