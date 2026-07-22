@@ -153,38 +153,157 @@ def convert_document_format(input_path, output_format='pdf'):
 
 def translate_and_dub_media(input_path, target_lang='km', is_video=True, progress_callback=None):
     """
-    1. Transcribes speech in video/audio to text.
-    2. Translates text into target_lang (Khmer, English, Chinese, French, Spanish, Japanese, etc.).
-    3. Generates new vocal dubbing audio using gTTS.
-    4. Merges/replaces video audio track with the translated voice dubbing.
+    Segment-level timed dubbing:
+    1. Transcribes speech WITH timestamps (each phrase: start_sec, end_sec, text).
+    2. Translates each segment individually.
+    3. Generates TTS for each translated segment.
+    4. Places each TTS clip at its exact original timestamp using FFmpeg adelay.
+    5. Mixes timed dubbed audio with original background audio at 20% volume.
+    6. Merges final audio track into the video.
     """
-    temp_dir = get_temp_dir()
-    
-    from plugins.document_parser import transcribe_audio_video
-    if progress_callback: progress_callback("⏳ Transcribing speech from media...")
-    transcript = transcribe_audio_video(input_path)
-    
-    if not transcript or "Error" in transcript or "Unsupported" in transcript or len(transcript.strip()) < 3:
-        return "ERROR: Could not recognize speech in media."
-        
-    lang_names = {'km': 'Khmer', 'en': 'English', 'zh': 'Chinese (Mandarin)', 'fr': 'French', 'es': 'Spanish', 'ja': 'Japanese', 'ko': 'Korean', 'de': 'German'}
-    target_lang_name = lang_names.get(target_lang[:2], 'Khmer')
-    
-    if progress_callback: progress_callback(f"🌐 Translating speech to {target_lang_name}...")
-    
     import asyncio
+    import subprocess
+    temp_dir = get_temp_dir()
+
+    from plugins.document_parser import transcribe_with_timestamps, transcribe_audio_video
     from plugins.ai_handler import get_ai_response
+    from gtts import gTTS
+
+    lang_names = {
+        'km': 'Khmer', 'en': 'English', 'zh': 'Chinese (Mandarin)',
+        'fr': 'French', 'es': 'Spanish', 'ja': 'Japanese',
+        'ko': 'Korean', 'de': 'German', 'vi': 'Vietnamese',
+        'th': 'Thai', 'id': 'Indonesian', 'ru': 'Russian', 'ar': 'Arabic'
+    }
+    target_lang_name = lang_names.get(target_lang[:2], 'Khmer')
+    tts_lang = 'km' if target_lang.startswith('km') else ('zh-CN' if target_lang.startswith('zh') else target_lang[:2])
+
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    orig_dur = get_video_duration(input_path)
+
+    # ── Step 1: Timestamped transcription ────────────────────────────────────
+    if progress_callback: progress_callback("⏳ Transcribing speech with timestamps...")
+    timed_segments = transcribe_with_timestamps(input_path)
+
+    # ── Step 2: Timed segment-level dubbing path ──────────────────────────────
+    if timed_segments and len(timed_segments) >= 1:
+        if progress_callback: progress_callback(f"🌐 Translating {len(timed_segments)} speech segments to {target_lang_name}...")
+
+        # Batch-translate all segments at once (numbered list for efficiency)
+        numbered_src = "\n".join(f"{i+1}. {seg[2]}" for i, seg in enumerate(timed_segments))
+        prompt = (
+            f"You are a professional movie dubbing translator.\n"
+            f"Translate each numbered line into natural spoken {target_lang_name}.\n"
+            f"Rules:\n"
+            f"1. Keep the SAME numbering (1. 2. 3. ...).\n"
+            f"2. Each translated line should be concise — similar length to the original spoken line.\n"
+            f"3. Output ONLY the numbered translated lines — NO headers, NO explanations, NO markdown.\n\n"
+            f"{numbered_src}"
+        )
+        try:
+            try:
+                loop = asyncio.get_running_loop()
+                batch_translation = asyncio.run_coroutine_threadsafe(get_ai_response(0, prompt), loop).result(60)
+            except RuntimeError:
+                batch_translation = asyncio.run(get_ai_response(0, prompt))
+        except Exception as e:
+            print(f"Batch translation error: {e}")
+            batch_translation = numbered_src  # fallback: use original text
+
+        # Parse numbered lines from AI response
+        translated_lines = {}
+        for line in batch_translation.strip().splitlines():
+            m = re.match(r'^(\d+)\.\s*(.+)', line.strip())
+            if m:
+                translated_lines[int(m.group(1))] = m.group(2).strip()
+
+        if progress_callback: progress_callback("🎙 Generating timed voiceover segments...")
+
+        # Generate TTS for each segment and record file + delay
+        tts_clips = []  # list of (delay_ms, tts_path)
+        for i, (start_sec, end_sec, orig_text) in enumerate(timed_segments):
+            seg_num = i + 1
+            translated_text = translated_lines.get(seg_num, orig_text)
+            # Clean text
+            translated_text = re.sub(r'[*#_~`>\[\]\(\)]', ' ', translated_text)
+            translated_text = " ".join(translated_text.split()).strip()
+            if not translated_text:
+                continue
+
+            tts_path = os.path.join(temp_dir, f"seg_{i}_{uuid.uuid4().hex}.mp3")
+            try:
+                tts = gTTS(text=translated_text, lang=tts_lang, slow=False)
+                tts.save(tts_path)
+                if os.path.exists(tts_path) and os.path.getsize(tts_path) > 0:
+                    delay_ms = max(0, int(start_sec * 1000))
+                    tts_clips.append((delay_ms, tts_path))
+            except Exception as tts_e:
+                print(f"TTS error for segment {i}: {tts_e}")
+
+        if tts_clips:
+            if progress_callback: progress_callback("🔀 Assembling timed dubbed audio track...")
+            # Build FFmpeg filter_complex with adelay per segment
+            dubbed_audio_path = os.path.join(temp_dir, f"timed_dub_{uuid.uuid4().hex}.mp3")
+            inputs_cmd = []
+            filter_parts = []
+            for idx, (delay_ms, tts_path) in enumerate(tts_clips):
+                inputs_cmd += ["-i", tts_path]
+                filter_parts.append(f"[{idx}:a]adelay={delay_ms}|{delay_ms}[a{idx}]")
+            n = len(tts_clips)
+            refs = "".join(f"[a{i}]" for i in range(n))
+            filter_complex = ";".join(filter_parts) + f";{refs}amix=inputs={n}:duration=longest:dropout_transition=0[dub]"
+
+            timed_ok = False
+            try:
+                cmd = [ffmpeg_exe, "-y"] + inputs_cmd + [
+                    "-filter_complex", filter_complex,
+                    "-map", "[dub]",
+                    "-t", str(orig_dur) if orig_dur > 0 else [],
+                    dubbed_audio_path
+                ]
+                subprocess.run([x for x in cmd if x != []], capture_output=True, check=True)
+                timed_ok = os.path.exists(dubbed_audio_path) and os.path.getsize(dubbed_audio_path) > 0
+            except Exception as asm_e:
+                print(f"Timed assembly error: {asm_e}")
+
+            if timed_ok:
+                # Pad to full video length if needed
+                tts_dur = get_video_duration(dubbed_audio_path)
+                if orig_dur > 0 and tts_dur < orig_dur:
+                    padded_path = os.path.join(temp_dir, f"padded_timed_{uuid.uuid4().hex}.mp3")
+                    try:
+                        subprocess.run(
+                            [ffmpeg_exe, "-y", "-i", dubbed_audio_path,
+                             "-af", f"apad=whole_dur={orig_dur}", "-t", str(orig_dur), padded_path],
+                            capture_output=True, check=True
+                        )
+                        if os.path.exists(padded_path) and os.path.getsize(padded_path) > 0:
+                            dubbed_audio_path = padded_path
+                    except Exception as pad_e:
+                        print(f"Timed pad error: {pad_e}")
+
+                # Mix with original background audio at 20%
+                final_audio_path = _mix_bg_with_dub(input_path, dubbed_audio_path, orig_dur, temp_dir, ffmpeg_exe)
+
+                # Merge into video
+                if progress_callback: progress_callback("🎬 Merging timed dubbed audio with video...")
+                return _merge_audio_into_video(input_path, final_audio_path, orig_dur, is_video, temp_dir, progress_callback)
+
+            # Cleanup segment files
+            for _, f in tts_clips:
+                if os.path.exists(f): os.remove(f)
+
+    # ── Step 3: Fallback — non-timed full-transcript dubbing ─────────────────
+    if progress_callback: progress_callback("⏳ Transcribing speech (fallback mode)...")
+    transcript = transcribe_audio_video(input_path)
+    if not transcript or "Error" in transcript or len(transcript.strip()) < 3:
+        return "ERROR: Could not recognize speech in media."
+
+    if progress_callback: progress_callback(f"🌐 Translating speech to {target_lang_name}...")
     prompt = (
-        f"You are a professional movie dubbing director and voiceover scriptwriter.\n"
-        f"Translate and adapt the following spoken transcript into natural, professional spoken {target_lang_name}.\n"
-        f"Guidelines:\n"
-        f"1. Make the phrasing sound like a native human speaker giving an engaging, fluent voiceover narration.\n"
-        f"2. Remove filler words (um, uh, like) and smooth out choppy or awkward sentence structures.\n"
-        f"3. Insert proper punctuation (commas, periods, question marks) so text-to-speech reads with natural human rhythm, pauses, and cadence.\n"
-        f"4. Output ONLY the raw spoken translation in {target_lang_name} script (NO English explanations, NO markdown, NO headers, NO quotes):\n\n"
-        f"{transcript}"
+        f"Translate this spoken transcript to natural spoken {target_lang_name}. "
+        f"Output ONLY the raw translated text — no headers, no markdown:\n\n{transcript}"
     )
-    
     try:
         try:
             loop = asyncio.get_running_loop()
@@ -192,149 +311,101 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
         except RuntimeError:
             translated_text = asyncio.run(get_ai_response(0, prompt))
     except Exception as e:
-        print(f"AI Translation Error: {e}")
         translated_text = transcript
-        
-    # Clean text strictly for gTTS speech with natural human pause punctuation
+
     translated_text = re.sub(r'[*#_~`>\[\]\(\)]', ' ', translated_text)
-    translated_text = re.sub(r'^(Here is|Translation|Translate|Khmer|English|Note):.*$', '', translated_text, flags=re.MULTILINE | re.IGNORECASE)
     translated_text = " ".join(translated_text.split()).strip()
-    
     if not translated_text:
         return "ERROR: Translation resulted in empty speech text."
-        
-    if progress_callback: progress_callback("🎙 Generating studio-quality voiceover dubbing...")
-    from gtts import gTTS
-    tts_lang = 'km' if target_lang.startswith('km') else ('zh-CN' if target_lang.startswith('zh') else target_lang[:2])
-    
-    raw_tts_output = os.path.join(temp_dir, f"{uuid.uuid4()}_raw_tts.mp3")
-    studio_tts_output = os.path.join(temp_dir, f"{uuid.uuid4()}_studio_tts.mp3")
-    synced_tts_output = os.path.join(temp_dir, f"{uuid.uuid4()}_synced_tts.mp3")
-    
+
+    if progress_callback: progress_callback("🎙 Generating voiceover dubbing...")
+    raw_tts = os.path.join(temp_dir, f"{uuid.uuid4()}_raw_tts.mp3")
     try:
         tts = gTTS(text=translated_text, lang=tts_lang, slow=False)
-        tts.save(raw_tts_output)
-        
-        # Apply professional audio studio filtering (lowpass/highpass EQ + warm volume boost)
+        tts.save(raw_tts)
+        # Studio EQ
+        studio_tts = os.path.join(temp_dir, f"{uuid.uuid4()}_studio_tts.mp3")
         try:
-            (
-                ffmpeg
-                .input(raw_tts_output)
-                .filter('highpass', f=80)
-                .filter('lowpass', f=12000)
-                .filter('volume', 1.2)
-                .output(studio_tts_output)
-                .overwrite_output()
-                .run(capture_stdout=True, capture_stderr=True)
-            )
-            if os.path.exists(studio_tts_output) and os.path.getsize(studio_tts_output) > 0:
-                raw_tts_output = studio_tts_output
-        except Exception as filter_e:
-            print(f"Audio filter error: {filter_e}")
+            (ffmpeg.input(raw_tts)
+             .filter('highpass', f=80).filter('lowpass', f=12000).filter('volume', 1.2)
+             .output(studio_tts).overwrite_output()
+             .run(capture_output=True, capture_stderr=True))
+            if os.path.exists(studio_tts) and os.path.getsize(studio_tts) > 0:
+                raw_tts = studio_tts
+        except Exception as eq_e:
+            print(f"EQ filter error: {eq_e}")
     except Exception as e:
-        print(f"gTTS Error: {e}")
         return f"ERROR: Failed to generate TTS voice: {e}"
-        
-    final_audio_track = raw_tts_output
 
-    if progress_callback: progress_callback("🎬 Mixing background audio + dubbed voice into video...")
-    output_ext = "mp4" if is_video else "mp3"
-    output_path = os.path.join(temp_dir, f"{uuid.uuid4()}_dubbed.{output_ext}")
-
-    if is_video:
+    tts_dur = get_video_duration(raw_tts)
+    if orig_dur > 0 and tts_dur < orig_dur:
+        padded = os.path.join(temp_dir, f"{uuid.uuid4()}_padded.mp3")
         try:
-            import subprocess
-            orig_dur = get_video_duration(input_path)
-            tts_dur  = get_video_duration(final_audio_track)
-            print(f"[Dub] orig_dur={orig_dur:.2f}s  tts_dur={tts_dur:.2f}s")
+            subprocess.run(
+                [ffmpeg_exe, "-y", "-i", raw_tts,
+                 "-af", f"apad=whole_dur={orig_dur}", "-t", str(orig_dur), padded],
+                capture_output=True, check=True
+            )
+            if os.path.exists(padded) and os.path.getsize(padded) > 0:
+                raw_tts = padded
+        except Exception as pad_e:
+            print(f"Fallback pad error: {pad_e}")
 
-            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    final_audio = _mix_bg_with_dub(input_path, raw_tts, orig_dur, temp_dir, ffmpeg_exe)
+    return _merge_audio_into_video(input_path, final_audio, orig_dur, is_video, temp_dir, progress_callback)
 
-            # Step 1: Pad TTS to full video duration with silence if shorter
-            if orig_dur > 0 and tts_dur > 0 and tts_dur < orig_dur:
-                padded_path = os.path.join(temp_dir, f"{uuid.uuid4()}_padded_dub.mp3")
-                try:
-                    subprocess.run(
-                        [ffmpeg_exe, "-y",
-                         "-i", final_audio_track,
-                         "-af", f"apad=whole_dur={orig_dur}",
-                         "-t", str(orig_dur),
-                         padded_path],
-                        capture_output=True, check=True
-                    )
-                    if os.path.exists(padded_path) and os.path.getsize(padded_path) > 0:
-                        final_audio_track = padded_path
-                        tts_dur = orig_dur
-                except Exception as pad_e:
-                    print(f"apad error: {pad_e}")
 
-            # Step 2: Extract original background audio (music + SFX) from input video
-            orig_audio_path = os.path.join(temp_dir, f"{uuid.uuid4()}_orig_audio.mp3")
-            bg_extracted = False
-            try:
-                subprocess.run(
-                    [ffmpeg_exe, "-y",
-                     "-i", input_path,
-                     "-vn",
-                     "-acodec", "libmp3lame", "-q:a", "4",
-                     orig_audio_path],
-                    capture_output=True, check=True
-                )
-                if os.path.exists(orig_audio_path) and os.path.getsize(orig_audio_path) > 0:
-                    bg_extracted = True
-            except Exception as bg_e:
-                print(f"Background audio extract error: {bg_e}")
+def _mix_bg_with_dub(input_path, dubbed_path, orig_dur, temp_dir, ffmpeg_exe):
+    """Mix original background audio (20%) with dubbed voice (100%) using amix."""
+    import subprocess
+    orig_audio = os.path.join(temp_dir, f"bg_{uuid.uuid4().hex}.mp3")
+    mixed = os.path.join(temp_dir, f"mixed_{uuid.uuid4().hex}.mp3")
+    try:
+        subprocess.run(
+            [ffmpeg_exe, "-y", "-i", input_path, "-vn",
+             "-acodec", "libmp3lame", "-q:a", "4", orig_audio],
+            capture_output=True, check=True
+        )
+        if os.path.exists(orig_audio) and os.path.getsize(orig_audio) > 0:
+            dur_arg = str(orig_dur) if orig_dur > 0 else "99999"
+            subprocess.run(
+                [ffmpeg_exe, "-y",
+                 "-i", orig_audio, "-i", dubbed_path,
+                 "-filter_complex",
+                 "[0:a]volume=0.20[bg];[1:a]volume=1.0[voice];[bg][voice]amix=inputs=2:duration=longest:dropout_transition=0[out]",
+                 "-map", "[out]", "-t", dur_arg, mixed],
+                capture_output=True, check=True
+            )
+            if os.path.exists(mixed) and os.path.getsize(mixed) > 0:
+                if os.path.exists(orig_audio): os.remove(orig_audio)
+                return mixed
+    except Exception as mix_e:
+        print(f"_mix_bg_with_dub error: {mix_e}")
+    if os.path.exists(orig_audio): os.remove(orig_audio)
+    return dubbed_path  # fallback: no background mix
 
-            # Step 3: Mix original background (20% volume) with TTS dubbed voice (100%)
-            mixed_audio_path = os.path.join(temp_dir, f"{uuid.uuid4()}_mixed_audio.mp3")
-            if bg_extracted:
-                try:
-                    subprocess.run(
-                        [ffmpeg_exe, "-y",
-                         "-i", orig_audio_path,
-                         "-i", final_audio_track,
-                         "-filter_complex",
-                         "[0:a]volume=0.20[bg];[1:a]volume=1.0[voice];[bg][voice]amix=inputs=2:duration=longest:dropout_transition=0[out]",
-                         "-map", "[out]",
-                         "-t", str(orig_dur if orig_dur > 0 else tts_dur),
-                         mixed_audio_path],
-                        capture_output=True, check=True
-                    )
-                    if os.path.exists(mixed_audio_path) and os.path.getsize(mixed_audio_path) > 0:
-                        final_audio_track = mixed_audio_path
-                except Exception as mix_e:
-                    print(f"amix error (using TTS only): {mix_e}")
 
-            target_dur = max(orig_dur, tts_dur) if (orig_dur > 0 or tts_dur > 0) else None
-
-            # Loop video if TTS is longer than original
-            if orig_dur > 0 and tts_dur > orig_dur:
-                video_in = ffmpeg.input(input_path, stream_loop=-1).video
-            else:
-                video_in = ffmpeg.input(input_path).video
-
-            audio_in = ffmpeg.input(final_audio_track).audio
-            out_opts = {'vcodec': 'copy', 'acodec': 'aac', 'b:a': '192k'}
-            if target_dur and target_dur > 0:
-                out_opts['t'] = target_dur
-
-            stream = ffmpeg.output(video_in, audio_in, output_path, **out_opts).overwrite_output()
-            res = _run_ffmpeg_with_progress(stream, output_path, progress_callback)
-
-            # Cleanup extracted bg audio and mixed audio
-            for f in [orig_audio_path, mixed_audio_path]:
-                if os.path.exists(f): os.remove(f)
-        except Exception as e:
-            print(f"FFmpeg Merge Error: {e}")
-            res = None
-    else:
-        res = final_audio_track
-
-    cleanup_file(raw_tts_output)
-    if os.path.exists(synced_tts_output) and final_audio_track != synced_tts_output:
-        cleanup_file(synced_tts_output)
-
-    return res
+def _merge_audio_into_video(input_path, audio_path, orig_dur, is_video, temp_dir, progress_callback=None):
+    """Merge a final audio track into the video (or return audio for audio-only)."""
+    if not is_video:
+        return audio_path
+    output_path = os.path.join(temp_dir, f"{uuid.uuid4()}_dubbed.mp4")
+    try:
+        tts_dur = get_video_duration(audio_path)
+        if orig_dur > 0 and tts_dur > orig_dur:
+            video_in = ffmpeg.input(input_path, stream_loop=-1).video
+        else:
+            video_in = ffmpeg.input(input_path).video
+        audio_in = ffmpeg.input(audio_path).audio
+        target_dur = max(orig_dur, tts_dur) if (orig_dur > 0 or tts_dur > 0) else None
+        out_opts = {'vcodec': 'copy', 'acodec': 'aac', 'b:a': '192k'}
+        if target_dur and target_dur > 0:
+            out_opts['t'] = target_dur
+        stream = ffmpeg.output(video_in, audio_in, output_path, **out_opts).overwrite_output()
+        return _run_ffmpeg_with_progress(stream, output_path, progress_callback)
+    except Exception as e:
+        print(f"_merge_audio_into_video error: {e}")
+        return None
 
 def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=False, progress_callback=None):
     """
@@ -419,97 +490,30 @@ def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=Fal
         
     final_audio = raw_tts
 
-    output_ext = "mp4" if is_video else "mp3"
-    output_path = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_dubbed.{output_ext}")
+    import subprocess
+    orig_dur = get_video_duration(input_path)
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
-    if is_video:
+    # Pad recap audio to full video length if shorter
+    tts_dur = get_video_duration(final_audio)
+    if orig_dur > 0 and tts_dur < orig_dur:
+        padded_path = os.path.join(temp_dir, f"{uuid.uuid4()}_padded_recap.mp3")
         try:
-            import subprocess
-            orig_dur = get_video_duration(input_path)
-            tts_dur  = get_video_duration(final_audio)
-            print(f"[Recap] orig_dur={orig_dur:.2f}s  tts_dur={tts_dur:.2f}s")
+            subprocess.run(
+                [ffmpeg_exe, "-y", "-i", final_audio,
+                 "-af", f"apad=whole_dur={orig_dur}", "-t", str(orig_dur), padded_path],
+                capture_output=True, check=True
+            )
+            if os.path.exists(padded_path) and os.path.getsize(padded_path) > 0:
+                final_audio = padded_path
+        except Exception as pad_e:
+            print(f"Recap apad error: {pad_e}")
 
-            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    # Mix background audio (20%) with recap voice (100%)
+    final_audio = _mix_bg_with_dub(input_path, final_audio, orig_dur, temp_dir, ffmpeg_exe)
 
-            # Step 1: Pad recap TTS to full video duration with silence if shorter
-            if orig_dur > 0 and tts_dur > 0 and tts_dur < orig_dur:
-                padded_path = os.path.join(temp_dir, f"{uuid.uuid4()}_padded_recap.mp3")
-                try:
-                    subprocess.run(
-                        [ffmpeg_exe, "-y",
-                         "-i", final_audio,
-                         "-af", f"apad=whole_dur={orig_dur}",
-                         "-t", str(orig_dur),
-                         padded_path],
-                        capture_output=True, check=True
-                    )
-                    if os.path.exists(padded_path) and os.path.getsize(padded_path) > 0:
-                        final_audio = padded_path
-                        tts_dur = orig_dur
-                except Exception as pad_e:
-                    print(f"Recap apad error: {pad_e}")
-
-            # Step 2: Extract original background audio (music + SFX)
-            orig_audio_path = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_orig_audio.mp3")
-            bg_extracted = False
-            try:
-                subprocess.run(
-                    [ffmpeg_exe, "-y",
-                     "-i", input_path,
-                     "-vn",
-                     "-acodec", "libmp3lame", "-q:a", "4",
-                     orig_audio_path],
-                    capture_output=True, check=True
-                )
-                if os.path.exists(orig_audio_path) and os.path.getsize(orig_audio_path) > 0:
-                    bg_extracted = True
-            except Exception as bg_e:
-                print(f"Recap background audio extract error: {bg_e}")
-
-            # Step 3: Mix original background (20% volume) with recap TTS voice (100%)
-            mixed_audio_path = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_mixed.mp3")
-            if bg_extracted:
-                try:
-                    subprocess.run(
-                        [ffmpeg_exe, "-y",
-                         "-i", orig_audio_path,
-                         "-i", final_audio,
-                         "-filter_complex",
-                         "[0:a]volume=0.20[bg];[1:a]volume=1.0[voice];[bg][voice]amix=inputs=2:duration=longest:dropout_transition=0[out]",
-                         "-map", "[out]",
-                         "-t", str(orig_dur if orig_dur > 0 else tts_dur),
-                         mixed_audio_path],
-                        capture_output=True, check=True
-                    )
-                    if os.path.exists(mixed_audio_path) and os.path.getsize(mixed_audio_path) > 0:
-                        final_audio = mixed_audio_path
-                except Exception as mix_e:
-                    print(f"Recap amix error (using TTS only): {mix_e}")
-
-            target_dur = max(orig_dur, tts_dur) if (orig_dur > 0 or tts_dur > 0) else None
-
-            # Loop video if recap voice is longer than original
-            if orig_dur > 0 and tts_dur > orig_dur:
-                video_in = ffmpeg.input(input_path, stream_loop=-1).video
-            else:
-                video_in = ffmpeg.input(input_path).video
-
-            audio_in = ffmpeg.input(final_audio).audio
-            out_opts = {'vcodec': 'copy', 'acodec': 'aac', 'b:a': '192k'}
-            if target_dur and target_dur > 0:
-                out_opts['t'] = target_dur
-
-            stream = ffmpeg.output(video_in, audio_in, output_path, **out_opts).overwrite_output()
-            res_media = _run_ffmpeg_with_progress(stream, output_path, progress_callback)
-
-            # Cleanup extracted and mixed audio
-            for f in [orig_audio_path, mixed_audio_path]:
-                if os.path.exists(f): os.remove(f)
-        except Exception as e:
-            print(f"FFmpeg Recap Merge Error: {e}")
-            res_media = None
-    else:
-        res_media = final_audio
+    if progress_callback: progress_callback("🎬 Merging recap audio with video...")
+    res_media = _merge_audio_into_video(input_path, final_audio, orig_dur, is_video, temp_dir, progress_callback)
 
     cleanup_file(raw_tts)
     if os.path.exists(synced_tts) and final_audio != synced_tts:

@@ -216,3 +216,88 @@ def transcribe_audio_video(file_path: str) -> str:
     finally:
         if os.path.exists(temp_wav): os.remove(temp_wav)
         if os.path.exists(temp_mp3): os.remove(temp_mp3)
+
+
+def transcribe_with_timestamps(file_path: str) -> list:
+    """
+    Returns a list of (start_sec, end_sec, text) tuples from Gemini with precise timestamps.
+    Used for segment-level timed dubbing so translated voice plays exactly when original speaker speaks.
+    Falls back to empty list if Gemini timestamps are unavailable.
+    """
+    import base64
+    import requests
+    import re
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return []
+
+    temp_mp3 = f"temp_ts_{uuid.uuid4().hex}.mp3"
+    try:
+        audio = AudioSegment.from_file(file_path)
+        # Limit to 30 min for Gemini payload size
+        max_ms = 30 * 60 * 1000
+        if len(audio) > max_ms:
+            audio = audio[:max_ms]
+        audio_mono = audio.set_frame_rate(24000).set_channels(1)
+        audio_mono.export(temp_mp3, format="mp3", bitrate="64k")
+
+        with open(temp_mp3, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+
+        # Try gemini-2.0-flash first, then 1.5-flash
+        for model in ["gemini-2.0-flash", "gemini-1.5-flash"]:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            payload = {
+                "generationConfig": {"temperature": 0.0, "topP": 0.05, "topK": 1},
+                "contents": [{
+                    "parts": [
+                        {
+                            "text": (
+                                "Transcribe this audio with EXACT start and end timestamps for every spoken sentence or phrase.\n"
+                                "Output ONLY in this strict format, one line per segment:\n"
+                                "[HH:MM:SS.mmm --> HH:MM:SS.mmm] spoken text here\n\n"
+                                "Rules:\n"
+                                "- Include ALL spoken words verbatim in original language.\n"
+                                "- Timestamps must match exactly when speech starts and ends.\n"
+                                "- Do NOT add any intro, outro, or explanation text.\n"
+                                "- If multiple speakers, still use same format."
+                            )
+                        },
+                        {"inline_data": {"mime_type": "audio/mp3", "data": b64}}
+                    ]
+                }]
+            }
+            try:
+                res = requests.post(url, json=payload, timeout=120).json()
+                if "candidates" not in res or not res["candidates"]:
+                    continue
+                raw_text = res["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+                # Parse [HH:MM:SS.mmm --> HH:MM:SS.mmm] text
+                pattern = re.compile(
+                    r'\[(\d+):(\d+):([\d.]+)\s*-->\s*(\d+):(\d+):([\d.]+)\]\s*(.+)'
+                )
+                segments = []
+                for m in pattern.finditer(raw_text):
+                    sh, sm, ss, eh, em, es, txt = m.groups()
+                    start = int(sh) * 3600 + int(sm) * 60 + float(ss)
+                    end   = int(eh) * 3600 + int(em) * 60 + float(es)
+                    txt = txt.strip()
+                    if txt and end > start:
+                        segments.append((start, end, txt))
+
+                if segments:
+                    print(f"[Timestamps] Got {len(segments)} segments from {model}")
+                    return segments
+            except Exception as model_e:
+                print(f"Timestamp transcription error ({model}): {model_e}")
+                continue
+
+    except Exception as e:
+        print(f"transcribe_with_timestamps outer error: {e}")
+    finally:
+        if os.path.exists(temp_mp3):
+            os.remove(temp_mp3)
+
+    return []
