@@ -225,3 +225,45 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
         res = tts_output
         
     return res
+
+def get_video_duration(file_path):
+    try:
+        probe = ffmpeg.probe(file_path)
+        return float(probe['format']['duration'])
+    except Exception as e:
+        print(f"Error getting video duration: {e}")
+        return 0.0
+
+def clip_video_into_parts(input_path, num_clips=3, progress_callback=None):
+    """
+    Splits a video file into num_clips equal segment files using FFmpeg.
+    """
+    temp_dir = get_temp_dir()
+    duration = get_video_duration(input_path)
+    
+    if duration <= 0:
+        return []
+        
+    clip_duration = duration / max(1, num_clips)
+    output_files = []
+    
+    for i in range(num_clips):
+        start_time = i * clip_duration
+        if progress_callback:
+            progress_callback(f"✂️ Cutting video clip {i+1} of {num_clips}...")
+            
+        out_file = os.path.join(temp_dir, f"{uuid.uuid4()}_clip_{i+1}.mp4")
+        try:
+            stream = (
+                ffmpeg
+                .input(input_path, ss=start_time, t=clip_duration)
+                .output(out_file, vcodec='copy', acodec='copy')
+                .overwrite_output()
+            )
+            ffmpeg.run(stream, capture_stdout=True, capture_stderr=True)
+            if os.path.exists(out_file) and os.path.getsize(out_file) > 0:
+                output_files.append(out_file)
+        except Exception as e:
+            print(f"Error creating clip {i+1}: {e}")
+            
+    return output_files

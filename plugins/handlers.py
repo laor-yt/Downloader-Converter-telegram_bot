@@ -293,7 +293,7 @@ async def button_callback(client, callback_query):
         elif mime_type.startswith('video/'):
             buttons = [
                 [InlineKeyboardButton("🎬 MP4", callback_data=f"conv_vid|{short_id}|mp4"), InlineKeyboardButton("🎬 MKV", callback_data=f"conv_vid|{short_id}|mkv"), InlineKeyboardButton("🎵 MP3", callback_data=f"conv_aud|{short_id}")],
-                [InlineKeyboardButton("🎙 Voice Dub & Translate", callback_data=f"file_show_dub|{short_id}")]
+                [InlineKeyboardButton("🎙 Voice Dub & Translate", callback_data=f"file_show_dub|{short_id}"), InlineKeyboardButton("✂️ Clip Video", callback_data=f"file_show_clip|{short_id}")]
             ]
         elif mime_type.startswith('audio/') or original_msg.voice:
             buttons = [
@@ -309,6 +309,19 @@ async def button_callback(client, callback_query):
         buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"file_show_main|{short_id}")])
         keyboard = InlineKeyboardMarkup(buttons)
         await safe_edit_text(query_msg, "🔄 **Choose conversion type:**", reply_markup=keyboard)
+
+    elif data.startswith("file_show_clip|"):
+        _, short_id = data.split("|")
+        original_msg = url_cache.get(short_id)
+        if not original_msg:
+            await callback_query.answer("Session expired. Please send the file again.", show_alert=True)
+            return
+        from pyrogram.types import ForceReply
+        await client.send_message(
+            query_msg.chat.id,
+            f"✂️ **How many clips do you want from this video?** [ID:{short_id}]\n\nPlease reply directly to this message with a number (e.g. 2, 3, 5):",
+            reply_markup=ForceReply(selective=True)
+        )
 
     elif data.startswith("file_show_dub|"):
         _, short_id = data.split("|")
@@ -376,10 +389,26 @@ async def button_callback(client, callback_query):
                 InlineKeyboardButton("🎵 Download Audio", callback_data=f"dl_aud|{short_id}")
             ],
             [
+                InlineKeyboardButton("✂️ Clip Video", callback_data=f"url_show_clip|{short_id}")
+            ],
+            [
                 InlineKeyboardButton("🔙 Back", callback_data=f"url_show_main|{short_id}")
             ]
         ])
         await safe_edit_text(query_msg, f"📥 **Download Options for:** `{url}`", reply_markup=keyboard)
+
+    elif data.startswith("url_show_clip|"):
+        _, short_id = data.split("|")
+        url = url_cache.get(short_id)
+        if not url:
+            await callback_query.answer("Session expired. Please send the link again.", show_alert=True)
+            return
+        from pyrogram.types import ForceReply
+        await client.send_message(
+            query_msg.chat.id,
+            f"✂️ **How many clips do you want from this video link?** [ID:{short_id}]\n\nPlease reply directly to this message with a number (e.g. 2, 3, 5):",
+            reply_markup=ForceReply(selective=True)
+        )
 
     elif data.startswith("url_show_ask|"):
         _, short_id = data.split("|")

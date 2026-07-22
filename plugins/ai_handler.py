@@ -367,6 +367,60 @@ async def private_ai_chat(client: Client, message: Message):
         return
         
     prompt = text
+    if message.reply_to_message and "How many clips do you want" in (message.reply_to_message.text or ""):
+        rep_text = message.reply_to_message.text
+        if "[ID:" in rep_text:
+            short_id = rep_text.split("[ID:")[1].split("]")[0]
+            from plugins.handlers import url_cache, cleanup_file
+            
+            import re
+            num_matches = re.findall(r'\d+', text)
+            num_clips = int(num_matches[0]) if num_matches else 3
+            num_clips = max(1, min(10, num_clips))
+            
+            cached_obj = url_cache.get(short_id)
+            if cached_obj:
+                processing_msg = await message.reply_text(f"✂️ Cutting video into {num_clips} clips...", reply_to_message_id=message.id)
+                try:
+                    if isinstance(cached_obj, str):
+                        from downloader import download_media
+                        dl_res = await asyncio.to_thread(download_media, cached_obj, 'video', None)
+                        file_path = dl_res[0] if isinstance(dl_res, tuple) else dl_res
+                    else:
+                        file_path = await client.download_media(cached_obj)
+                        
+                    if file_path and os.path.exists(file_path):
+                        from converter import clip_video_into_parts
+                        clips = await asyncio.to_thread(clip_video_into_parts, file_path, num_clips)
+                        
+                        if clips:
+                            await processing_msg.edit_text(f"Uploading {len(clips)} video clips...")
+                            for idx, clip_path in enumerate(clips):
+                                try:
+                                    await client.send_video(
+                                        chat_id=message.chat.id,
+                                        video=clip_path,
+                                        caption=f"🎬 **Clip {idx+1} of {len(clips)}**",
+                                        supports_streaming=True
+                                    )
+                                except Exception as e_clip:
+                                    print(f"Error sending clip {idx+1}: {e_clip}")
+                                finally:
+                                    cleanup_file(clip_path)
+                            await processing_msg.edit_text(f"Done! Sent {len(clips)} video clips. ✅")
+                        else:
+                            await processing_msg.edit_text("❌ Failed to split video into clips.")
+                            
+                        cleanup_file(file_path)
+                        return
+                    else:
+                        await processing_msg.edit_text("❌ Could not download video for clipping.")
+                        return
+                except Exception as e:
+                    print(f"Video clipping error: {e}")
+                    await processing_msg.edit_text(f"❌ Clipping failed: {e}")
+                    return
+
     if message.reply_to_message and "Ask Udom about this file:" in (message.reply_to_message.text or ""):
         rep_text = message.reply_to_message.text
         if "[ID:" in rep_text:
