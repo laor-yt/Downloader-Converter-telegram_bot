@@ -66,19 +66,25 @@ KHMER TRADITIONAL MEASUREMENT UNITS (រង្វាស់រង្វាល់�
 - 1 ហិចតា (Hectare) = 10,000 m²
 - 1 សិនការើ (Square Sen) = 1,600 m²
 
-CRITICAL INSTRUCTION FOR IMAGES:
-You have a built-in professional AI image generator (FLUX). When the user asks to generate, draw, or create any image, reply with ONLY this URL and nothing else:
-https://image.pollinations.ai/prompt/{full_detailed_description},ultra-realistic,professional_photography,8K,RAW_photo,award-winning,cinematic_lighting,tack_sharp_focus,masterpiece_quality?model=flux&width=1920&height=1080&nologo=true&enhance=true
-- Replace {full_detailed_description} with rich English keywords (underscores for spaces)
-- Add style keywords: portrait→bokeh,Rembrandt_lighting | landscape→golden_hour,HDR | fantasy→Unreal_Engine_5,concept_art
-- Always include: photorealistic,8K,highly_detailed,masterpiece
+CRITICAL INSTRUCTION FOR AUTONOMOUS ACTIONS (INTENT ROUTING):
+You have built-in tools. If the user asks you to perform an action, you MUST reply with EXACTLY one of the following commands and absolutely nothing else. The system will intercept it and execute the action automatically.
 
-CRITICAL INSTRUCTION FOR VIDEOS:
-You have a built-in free AI video generator. When the user asks to generate or create a video, tell them to use:
-- `/video <description>` for text-to-video
-- Send an image and tap 🎬 Make Video for image-to-video (animation)
-- Send an audio file and tap 🎬 Make Video for audio-to-video (cinematic slideshow)
-Video generation is FREE and takes 1-5 minutes. Do NOT say you cannot generate videos.
+1. GENERATE IMAGE: If the user asks to generate, draw, or create an image/photo, reply EXACTLY with:
+[COMMAND:IMAGE] <rich english image description with styles, e.g. a cat at sunset, photorealistic, 8k>
+
+2. GENERATE VIDEO: If the user asks to generate, create, or make a video, reply EXACTLY with:
+[COMMAND:VIDEO] <detailed english video description>
+
+3. DOWNLOAD MEDIA: If the user asks to download a video, audio, or media from a provided URL/link, reply EXACTLY with:
+[COMMAND:DOWNLOAD] <the_url_they_provided>
+
+4. CONVERT FILE: If the user asks to convert a file or change format, reply EXACTLY with:
+[COMMAND:CONVERT]
+
+5. WEB SEARCH: If the user explicitly asks you to search the internet or look up live information, reply EXACTLY with:
+[COMMAND:SEARCH] <search_query>
+
+If the user is just chatting normally or asking a question that doesn't require these specific tools, just reply conversationally in their language.
 """
 
 async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):
@@ -442,6 +448,45 @@ def extract_image_url(text):
     return None
 
 async def send_ai_reply_or_photo(message, processing_msg, reply, prompt_text=""):
+    if reply.startswith("[COMMAND:"):
+        import re
+        cmd_match = re.match(r"^\[COMMAND:([A-Z]+)\](.*)", reply, re.DOTALL)
+        if cmd_match:
+            cmd_type = cmd_match.group(1)
+            arg = cmd_match.group(2).strip()
+            
+            client = message._client
+            await processing_msg.delete()
+            
+            if cmd_type == "DOWNLOAD":
+                message.text = f"/download {arg}"
+                message.command = ["download"] + arg.split()
+                from plugins.handlers import download_command
+                await download_command(client, message)
+                return
+            elif cmd_type == "CONVERT":
+                message.text = f"/convert"
+                message.command = ["convert"]
+                from plugins.handlers import convert_command
+                await convert_command(client, message)
+                return
+            elif cmd_type == "VIDEO":
+                message.text = f"/video {arg}"
+                message.command = ["video"] + arg.split()
+                from plugins.handlers import video_command
+                await video_command(client, message)
+                return
+            elif cmd_type == "SEARCH":
+                message.text = f"/search {arg}"
+                message.command = ["search"] + arg.split()
+                await search_command(client, message)
+                return
+            elif cmd_type == "IMAGE":
+                message.text = f"/image {arg}"
+                message.command = ["image"] + arg.split()
+                await image_command(client, message)
+                return
+
     img_url = extract_image_url(reply)
     if img_url:
         try:
@@ -548,11 +593,7 @@ async def group_ai_chat(client: Client, message: Message):
         async with RealtimeTimer(processing_msg, "🤔 Thinking"):
             reply = await get_ai_response(message.chat.id, prompt)
         
-        if "image.pollinations.ai" in reply:
-            await message.reply_photo(reply.strip())
-            await processing_msg.delete()
-        else:
-            await processing_msg.edit_text(reply)
+        await send_ai_reply_or_photo(message, processing_msg, reply, prompt_text=prompt)
 
 # Handle AI chat in private messages (if it's not a URL or command)
 @Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "ask", "search", "image", "video", "download", "convert", "finance", "market"]), group=1)
