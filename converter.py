@@ -3,7 +3,7 @@ import uuid
 import ffmpeg
 import imageio_ffmpeg
 from PIL import Image
-from utils import get_temp_dir
+from utils import get_temp_dir, cleanup_file
 
 import re
 
