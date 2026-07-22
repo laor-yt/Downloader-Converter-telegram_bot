@@ -167,7 +167,7 @@ async def recover_missed_messages(token: str):
         try:
             delay_str = f"{age_hours:.0f} hour{'s' if age_hours >= 2 else ''}"
             ai_reply = await get_ai_response(chat_id, text)
-            full_reply = f"⚠️ _I was offline. Here's my delayed reply (~{delay_str} late):_\n\n{ai_reply}"
+            full_reply = ai_reply
             if len(full_reply) > 4000:
                 full_reply = full_reply[:4000] + "..."
             _send_reply(token, chat_id, full_reply, reply_to_id=msg_id)
