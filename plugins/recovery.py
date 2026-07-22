@@ -19,60 +19,19 @@ import time
 import asyncio
 import logging
 import requests as _requests
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-OFFSET_FILE = os.path.join(os.path.dirname(__file__), "..", "last_update_offset.txt")
 MAX_AGE_HOURS = 48          # ignore messages older than 48 hours
 REPLY_DELAY_SEC = 0.6       # delay between replies to avoid flooding
 COMMANDS_TO_SKIP = {"/start", "/help", "/train", "/brainstats", "/timezone"}
 
 
-def _load_offset() -> tuple[int, int]:
-    """Return (last_update_id, last_msg_ts) from the offset file."""
-    last_update_id = 0
-    last_msg_ts = 0
-    try:
-        if os.path.exists(OFFSET_FILE):
-            for line in open(OFFSET_FILE).readlines():
-                line = line.strip()
-                if line.startswith("msg_ts:"):
-                    try:
-                        ts = int(line.split(":", 1)[1])
-                        if ts > last_msg_ts:
-                            last_msg_ts = ts
-                    except ValueError:
-                        pass
-                else:
-                    try:
-                        val = int(line)
-                        # Telegram update_ids are strictly positive integers < 1,500,000,000
-                        if 0 < val < 1500000000 and val > last_update_id:
-                            last_update_id = val
-                    except ValueError:
-                        pass
-    except Exception:
-        pass
-    return last_update_id, last_msg_ts
-
-
-def _save_offset(update_id: int):
-    """Save the latest processed update_id (overwrite entire file cleanly)."""
-    try:
-        if 0 < update_id < 1500000000:
-            with open(OFFSET_FILE, "w") as f:
-                f.write(str(update_id) + "\n")
-    except Exception as e:
-        logger.warning(f"[Recovery] Could not save offset: {e}")
-
-
 def _fetch_updates(token: str, offset: int) -> list:
-    """Fetch pending Telegram updates starting from `offset`."""
+    """Fetch pending Telegram updates starting from `offset`.
+    If offset is 0, Telegram automatically returns the oldest unconfirmed updates.
+    """
     try:
-        if offset > 1500000000:
-            offset = 0
-
         url = f"https://api.telegram.org/bot{token}/getUpdates"
         params = {
             "limit": 100,
@@ -80,7 +39,7 @@ def _fetch_updates(token: str, offset: int) -> list:
             "allowed_updates": ["message", "callback_query"]
         }
         if offset > 0:
-            params["offset"] = offset + 1
+            params["offset"] = offset
 
         resp = _requests.get(url, params=params, timeout=10)
         data = resp.json()
@@ -110,26 +69,23 @@ def _send_reply(token: str, chat_id: int, text: str, reply_to_id: int | None = N
 async def recover_missed_messages(token: str):
     """
     Main entry point. Call this once during bot startup (before pyrogram.idle).
-    Fetches and replies to all unprocessed messages, then saves the new offset.
+    Fetches and replies to all unprocessed messages.
     """
-    last_offset, last_seen_ts = _load_offset()
-    updates = _fetch_updates(token, last_offset)
+    # Delete webhook to ensure getUpdates works
+    try:
+        _requests.post(f"https://api.telegram.org/bot{token}/deleteWebhook", json={"drop_pending_updates": False}, timeout=5)
+    except Exception:
+        pass
+
+    # Pass offset=0 so Telegram returns unconfirmed updates automatically
+    updates = _fetch_updates(token, 0)
 
     if not updates:
         logger.info("[Recovery] No missed messages to process.")
-        # Peek at the latest update_id and save it so next restart skips these
-        try:
-            url = f"https://api.telegram.org/bot{token}/getUpdates"
-            resp = _requests.get(url, params={"offset": -1, "limit": 1, "timeout": 0}, timeout=10).json()
-            results = resp.get("result", [])
-            if results:
-                _save_offset(results[-1]["update_id"])
-        except Exception:
-            pass
         return
 
     now_ts = time.time()
-    new_offset = last_offset
+    highest_update_id = 0
     recovered = 0
     skipped = 0
 
@@ -139,8 +95,8 @@ async def recover_missed_messages(token: str):
 
     for update in updates:
         update_id = update.get("update_id", 0)
-        if update_id > new_offset:
-            new_offset = update_id
+        if update_id > highest_update_id:
+            highest_update_id = update_id
 
         msg = update.get("message")
         if not msg:
@@ -148,13 +104,6 @@ async def recover_missed_messages(token: str):
             continue
 
         msg_ts = msg.get("date", 0)
-
-        # Skip messages the bot already processed before going offline
-        if last_seen_ts > 0 and msg_ts <= last_seen_ts:
-            logger.info(f"[Recovery] Skipping already-seen message (ts={msg_ts})")
-            skipped += 1
-            continue
-
         chat_id = msg.get("chat", {}).get("id")
         text = msg.get("text", "").strip()
         msg_id = msg.get("message_id")
@@ -162,24 +111,19 @@ async def recover_missed_messages(token: str):
         # Skip if message is too old (> 48 hours)
         age_hours = (now_ts - msg_ts) / 3600
         if age_hours > MAX_AGE_HOURS:
-            logger.info(f"[Recovery] Skipping old message ({age_hours:.1f}h old): {text[:40]}")
             skipped += 1
             continue
 
-        # Skip empty text or non-text (photos handled by Pyrogram normally)
         if not text or not chat_id:
             skipped += 1
             continue
 
-        # Skip ignored commands
         cmd_word = text.split()[0].lower().split("@")[0]
         if cmd_word in COMMANDS_TO_SKIP:
             skipped += 1
             continue
 
-        # Skip download/convert commands — files are gone, can't process
         if cmd_word in {"/download", "/convert", "/image", "/ask", "/search"}:
-            # For /ask, /search, /image we CAN still answer
             if cmd_word == "/ask":
                 text = " ".join(text.split()[1:]).strip() or "Hello"
             elif cmd_word == "/search":
@@ -194,16 +138,12 @@ async def recover_missed_messages(token: str):
                 if raw:
                     from plugins.ai_handler import clean_and_generate_image_url
                     img_url = clean_and_generate_image_url(raw)
-                    delay_notice = (
-                        f"⚠️ _I was offline and just came back online._\n"
-                        f"_Here's your image (delayed by ~{age_hours:.0f}h):_"
-                    )
+                    delay_notice = f"⚠️ _I was offline. Here's your image (delayed by ~{age_hours:.0f}h):_"
                     _send_reply(token, chat_id, delay_notice, reply_to_id=msg_id)
                     try:
                         _requests.post(
                             f"https://api.telegram.org/bot{token}/sendPhoto",
-                            json={"chat_id": chat_id, "photo": img_url,
-                                  "caption": f"🎨 `{raw}`", "parse_mode": "Markdown"},
+                            json={"chat_id": chat_id, "photo": img_url, "caption": f"🎨 `{raw}`", "parse_mode": "Markdown"},
                             timeout=30
                         )
                     except Exception as img_e:
@@ -217,52 +157,31 @@ async def recover_missed_messages(token: str):
                 _send_reply(
                     token, chat_id,
                     f"⚠️ _I was offline when you sent this. I'm back now!_\n"
-                    f"_Unfortunately I cannot process your `{cmd_word}` request retroactively "
-                    f"(the file/link may have changed). Please send it again and I'll handle it right away!_ 🚀",
+                    f"_Please send your `{cmd_word}` request again and I'll handle it right away!_ 🚀",
                     reply_to_id=msg_id
                 )
                 recovered += 1
                 await asyncio.sleep(REPLY_DELAY_SEC)
                 continue
 
-        # For regular text messages and /ask — generate AI reply
         try:
             delay_str = f"{age_hours:.0f} hour{'s' if age_hours >= 2 else ''}"
-            logger.info(f"[Recovery] Replying to chat {chat_id}: '{text[:50]}' (delayed {delay_str})")
-
-            # Get AI answer
             ai_reply = await get_ai_response(chat_id, text)
-
-            delay_notice = (
-                f"⚠️ _I was offline and just came back online. "
-                f"Here's my delayed reply (~{delay_str} late):_\n\n"
-            )
-            full_reply = delay_notice + ai_reply
-
-            # Telegram message limit is 4096 chars
+            full_reply = f"⚠️ _I was offline. Here's my delayed reply (~{delay_str} late):_\n\n{ai_reply}"
             if len(full_reply) > 4000:
                 full_reply = full_reply[:4000] + "..."
-
             _send_reply(token, chat_id, full_reply, reply_to_id=msg_id)
             recovered += 1
-
         except Exception as reply_e:
             logger.warning(f"[Recovery] Failed to reply to message: {reply_e}")
-            _send_reply(
-                token, chat_id,
-                "⚠️ _I was offline. I'm back now! Please resend your message and I'll reply right away._",
-                reply_to_id=msg_id
-            )
 
         await asyncio.sleep(REPLY_DELAY_SEC)
 
-    # Save offset so next startup won't reprocess these
-    _save_offset(new_offset)
-    logger.info(
-        f"[Recovery] Done. Recovered: {recovered}, Skipped: {skipped}, "
-        f"New offset: {new_offset}"
-    )
-
+    # Confirm updates to Telegram so they aren't delivered again
+    if highest_update_id > 0:
+        _fetch_updates(token, highest_update_id + 1)
+        
+    logger.info(f"[Recovery] Done. Recovered: {recovered}, Skipped: {skipped}")
 
 def _send_callback_answer(token: str, callback_id: str, text: str = ""):
     try:
@@ -309,9 +228,7 @@ async def run_http_fallback_loop(token: str, wait_seconds: int):
 
     logger.info(f"[Fallback] Starting HTTP Bot API polling for {wait_seconds}s (FloodWait active)...")
     end_time = time.time() + wait_seconds
-    last_offset, _ = _load_offset()
-    if last_offset > 1500000000:
-        last_offset = 0
+    current_offset = 0
 
     from plugins.ai_handler import get_ai_response, clean_and_generate_image_url
 
@@ -390,11 +307,11 @@ async def run_http_fallback_loop(token: str, wait_seconds: int):
 
     while time.time() < end_time:
         try:
-            updates = _fetch_updates(token, last_offset)
+            updates = _fetch_updates(token, current_offset)
             for update in updates:
                 update_id = update.get("update_id", 0)
-                if update_id > last_offset:
-                    last_offset = update_id
+                if update_id >= current_offset:
+                    current_offset = update_id + 1
 
                 # Handle callback queries (inline buttons)
                 cb = update.get("callback_query")
@@ -420,7 +337,6 @@ async def run_http_fallback_loop(token: str, wait_seconds: int):
                     elif cb_data == "howto_en":
                         _edit_message_text(token, cb_chat_id, cb_msg_id, howto_en_text, back_howto_kb)
 
-                    _save_offset(last_offset)
                     continue
 
                 # Handle text messages
@@ -497,11 +413,13 @@ async def run_http_fallback_loop(token: str, wait_seconds: int):
                         ans = ans[:4000] + "..."
                     _send_reply(token, chat_id, ans, reply_to_id=msg_id)
 
-                _save_offset(last_offset)
 
         except Exception as e:
             logger.warning(f"[Fallback] Error in fallback loop: {e}")
 
         await asyncio.sleep(1.0)
+
+    if current_offset > 0:
+        _fetch_updates(token, current_offset)
 
     logger.info("[Fallback] HTTP fallback polling completed. Retrying Pyrogram start...")
