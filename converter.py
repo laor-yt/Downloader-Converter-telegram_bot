@@ -237,23 +237,23 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
         
     final_audio_track = raw_tts_output
 
-    if progress_callback: progress_callback("🎬 Merging translated vocal audio with video...")
+    if progress_callback: progress_callback("🎬 Mixing background audio + dubbed voice into video...")
     output_ext = "mp4" if is_video else "mp3"
     output_path = os.path.join(temp_dir, f"{uuid.uuid4()}_dubbed.{output_ext}")
 
     if is_video:
         try:
+            import subprocess
             orig_dur = get_video_duration(input_path)
             tts_dur  = get_video_duration(final_audio_track)
             print(f"[Dub] orig_dur={orig_dur:.2f}s  tts_dur={tts_dur:.2f}s")
 
             ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
+            # Step 1: Pad TTS to full video duration with silence if shorter
             if orig_dur > 0 and tts_dur > 0 and tts_dur < orig_dur:
-                # TTS shorter than video — pad audio with silence to match video length
                 padded_path = os.path.join(temp_dir, f"{uuid.uuid4()}_padded_dub.mp3")
                 try:
-                    import subprocess
                     subprocess.run(
                         [ffmpeg_exe, "-y",
                          "-i", final_audio_track,
@@ -268,21 +268,62 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
                 except Exception as pad_e:
                     print(f"apad error: {pad_e}")
 
+            # Step 2: Extract original background audio (music + SFX) from input video
+            orig_audio_path = os.path.join(temp_dir, f"{uuid.uuid4()}_orig_audio.mp3")
+            bg_extracted = False
+            try:
+                subprocess.run(
+                    [ffmpeg_exe, "-y",
+                     "-i", input_path,
+                     "-vn",
+                     "-acodec", "libmp3lame", "-q:a", "4",
+                     orig_audio_path],
+                    capture_output=True, check=True
+                )
+                if os.path.exists(orig_audio_path) and os.path.getsize(orig_audio_path) > 0:
+                    bg_extracted = True
+            except Exception as bg_e:
+                print(f"Background audio extract error: {bg_e}")
+
+            # Step 3: Mix original background (20% volume) with TTS dubbed voice (100%)
+            mixed_audio_path = os.path.join(temp_dir, f"{uuid.uuid4()}_mixed_audio.mp3")
+            if bg_extracted:
+                try:
+                    subprocess.run(
+                        [ffmpeg_exe, "-y",
+                         "-i", orig_audio_path,
+                         "-i", final_audio_track,
+                         "-filter_complex",
+                         "[0:a]volume=0.20[bg];[1:a]volume=1.0[voice];[bg][voice]amix=inputs=2:duration=longest:dropout_transition=0[out]",
+                         "-map", "[out]",
+                         "-t", str(orig_dur if orig_dur > 0 else tts_dur),
+                         mixed_audio_path],
+                        capture_output=True, check=True
+                    )
+                    if os.path.exists(mixed_audio_path) and os.path.getsize(mixed_audio_path) > 0:
+                        final_audio_track = mixed_audio_path
+                except Exception as mix_e:
+                    print(f"amix error (using TTS only): {mix_e}")
+
             target_dur = max(orig_dur, tts_dur) if (orig_dur > 0 or tts_dur > 0) else None
 
-            # Loop video if TTS is longer than original video
+            # Loop video if TTS is longer than original
             if orig_dur > 0 and tts_dur > orig_dur:
                 video_in = ffmpeg.input(input_path, stream_loop=-1).video
             else:
                 video_in = ffmpeg.input(input_path).video
 
             audio_in = ffmpeg.input(final_audio_track).audio
-            out_opts = {'vcodec': 'copy', 'acodec': 'aac'}
+            out_opts = {'vcodec': 'copy', 'acodec': 'aac', 'b:a': '192k'}
             if target_dur and target_dur > 0:
                 out_opts['t'] = target_dur
 
             stream = ffmpeg.output(video_in, audio_in, output_path, **out_opts).overwrite_output()
             res = _run_ffmpeg_with_progress(stream, output_path, progress_callback)
+
+            # Cleanup extracted bg audio and mixed audio
+            for f in [orig_audio_path, mixed_audio_path]:
+                if os.path.exists(f): os.remove(f)
         except Exception as e:
             print(f"FFmpeg Merge Error: {e}")
             res = None
@@ -383,17 +424,17 @@ def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=Fal
 
     if is_video:
         try:
+            import subprocess
             orig_dur = get_video_duration(input_path)
             tts_dur  = get_video_duration(final_audio)
             print(f"[Recap] orig_dur={orig_dur:.2f}s  tts_dur={tts_dur:.2f}s")
 
             ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
+            # Step 1: Pad recap TTS to full video duration with silence if shorter
             if orig_dur > 0 and tts_dur > 0 and tts_dur < orig_dur:
-                # Recap voice shorter than video — pad with silence to fill full video length
                 padded_path = os.path.join(temp_dir, f"{uuid.uuid4()}_padded_recap.mp3")
                 try:
-                    import subprocess
                     subprocess.run(
                         [ffmpeg_exe, "-y",
                          "-i", final_audio,
@@ -408,6 +449,43 @@ def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=Fal
                 except Exception as pad_e:
                     print(f"Recap apad error: {pad_e}")
 
+            # Step 2: Extract original background audio (music + SFX)
+            orig_audio_path = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_orig_audio.mp3")
+            bg_extracted = False
+            try:
+                subprocess.run(
+                    [ffmpeg_exe, "-y",
+                     "-i", input_path,
+                     "-vn",
+                     "-acodec", "libmp3lame", "-q:a", "4",
+                     orig_audio_path],
+                    capture_output=True, check=True
+                )
+                if os.path.exists(orig_audio_path) and os.path.getsize(orig_audio_path) > 0:
+                    bg_extracted = True
+            except Exception as bg_e:
+                print(f"Recap background audio extract error: {bg_e}")
+
+            # Step 3: Mix original background (20% volume) with recap TTS voice (100%)
+            mixed_audio_path = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_mixed.mp3")
+            if bg_extracted:
+                try:
+                    subprocess.run(
+                        [ffmpeg_exe, "-y",
+                         "-i", orig_audio_path,
+                         "-i", final_audio,
+                         "-filter_complex",
+                         "[0:a]volume=0.20[bg];[1:a]volume=1.0[voice];[bg][voice]amix=inputs=2:duration=longest:dropout_transition=0[out]",
+                         "-map", "[out]",
+                         "-t", str(orig_dur if orig_dur > 0 else tts_dur),
+                         mixed_audio_path],
+                        capture_output=True, check=True
+                    )
+                    if os.path.exists(mixed_audio_path) and os.path.getsize(mixed_audio_path) > 0:
+                        final_audio = mixed_audio_path
+                except Exception as mix_e:
+                    print(f"Recap amix error (using TTS only): {mix_e}")
+
             target_dur = max(orig_dur, tts_dur) if (orig_dur > 0 or tts_dur > 0) else None
 
             # Loop video if recap voice is longer than original
@@ -417,12 +495,16 @@ def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=Fal
                 video_in = ffmpeg.input(input_path).video
 
             audio_in = ffmpeg.input(final_audio).audio
-            out_opts = {'vcodec': 'copy', 'acodec': 'aac'}
+            out_opts = {'vcodec': 'copy', 'acodec': 'aac', 'b:a': '192k'}
             if target_dur and target_dur > 0:
                 out_opts['t'] = target_dur
 
             stream = ffmpeg.output(video_in, audio_in, output_path, **out_opts).overwrite_output()
             res_media = _run_ffmpeg_with_progress(stream, output_path, progress_callback)
+
+            # Cleanup extracted and mixed audio
+            for f in [orig_audio_path, mixed_audio_path]:
+                if os.path.exists(f): os.remove(f)
         except Exception as e:
             print(f"FFmpeg Recap Merge Error: {e}")
             res_media = None
