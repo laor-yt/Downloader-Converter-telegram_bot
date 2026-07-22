@@ -575,7 +575,7 @@ async def button_callback(client, callback_query):
         else:
             await safe_edit_text(query_msg, "❌ Failed to download the media. The link may be unsupported or geo-restricted.")
             
-    elif data.startswith("conv_"):
+    elif data.startswith("conv_") or data.startswith("dub_lang|"):
         parts = data.split('|')
         action = parts[0]
         short_id = parts[1]
