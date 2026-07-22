@@ -69,7 +69,13 @@ def main():
             break
         except FloodWait as e:
             logger.warning(f"Telegram FloodWait: waiting {e.value}s before retrying auth...")
-            time.sleep(e.value + 2)
+            try:
+                from plugins.recovery import run_http_fallback_loop
+                logger.info(f"[Fallback] Activating HTTP Bot API mode so bot can reply to /start and user messages now!")
+                app.loop.run_until_complete(run_http_fallback_loop(token, e.value + 2))
+            except Exception as fb_err:
+                logger.error(f"[Fallback] Fallback error: {fb_err}")
+                time.sleep(e.value + 2)
         except Exception as e:
             logger.error(f"Failed to start Pyrogram client: {e}")
             raise e
