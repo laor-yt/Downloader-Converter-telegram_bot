@@ -269,10 +269,10 @@ def clean_and_generate_image_url(raw_prompt):
     if not p:
         p = "beautiful high quality masterpiece"
         
-    enhanced_prompt = f"{p}, 8k resolution, photorealistic, masterpiece, highly detailed, professional photography, realistic"
+    enhanced_prompt = f"{p}, Full HD, 1080p, 8k resolution, photorealistic, masterpiece, highly detailed, professional photography, crisp focus"
     encoded_prompt = urllib.parse.quote(enhanced_prompt)
     
-    return f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&width=1024&height=1024&nologo=true&enhance=true"
+    return f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&width=1920&height=1080&nologo=true&enhance=true"
 
 def extract_image_url(text):
     match = re.search(r'https?://image\.pollinations\.ai/prompt/[^\s\)\>\]]+', text)
