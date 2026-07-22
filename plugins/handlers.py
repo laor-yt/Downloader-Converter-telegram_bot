@@ -14,8 +14,28 @@ import requests
 
 url_cache = {}
 
+# ── Update offset tracker ──────────────────────────────────────────────────────
+# Saves the latest processed Telegram update_id so the recovery system knows
+# exactly where to resume after a server restart / downtime.
+_OFFSET_FILE = os.path.join(os.path.dirname(__file__), "..", "last_update_offset.txt")
+
+def _track_offset(message):
+    """Call this at the start of every handler to track the latest offset."""
+    try:
+        # Pyrogram Message doesn't expose update_id directly, but we can use
+        # the message_id as a proxy — recovery uses Bot API update_id separately.
+        # Store the latest message date (Unix ts) to filter out already-seen messages.
+        ts = int(getattr(message, "date", None) or 0)
+        if ts > 0:
+            with open(_OFFSET_FILE, "a") as f:
+                f.write(f"msg_ts:{ts}\n")
+    except Exception:
+        pass
+
+
 def is_url(text):
     return "http://" in text or "https://" in text
+
 
 @Client.on_message(filters.command(["start"]) | filters.regex("^(ℹ️ Help)$"))
 async def start_command(client, message):

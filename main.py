@@ -57,17 +57,26 @@ def main():
     
     app.start()
 
+    # ── Recover missed messages from while the bot was offline ────────────
+    async def run_recovery():
+        try:
+            from plugins.recovery import recover_missed_messages
+            logger.info("[Recovery] Checking for missed messages...")
+            await recover_missed_messages(token)
+        except Exception as e:
+            logger.error(f"[Recovery] Error during startup recovery: {e}")
+
+    app.loop.run_until_complete(run_recovery())
+
     # ── Start self-learning brain background loop ──────────────────────────
     async def start_brain_loop():
         try:
             from plugins.brain import auto_training_loop, bot_brain
-            # Do one quick initial research session on first run (if no facts yet)
             stats = bot_brain.stats()
             if stats["total_facts"] == 0:
                 logger.info("[Brain] First run — starting initial research session...")
                 await bot_brain.auto_research(limit=3)
                 logger.info(f"[Brain] Initial research complete. {bot_brain.stats()['total_facts']} facts stored.")
-            # Start background 6-hour loop
             app.loop.create_task(auto_training_loop())
             logger.info("[Brain] Auto-training loop started (every 6 hours).")
         except Exception as e:
