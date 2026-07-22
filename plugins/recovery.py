@@ -285,27 +285,116 @@ async def run_http_fallback_loop(token: str, wait_seconds: int):
         "_Built with ❤️ — 100% free, no limits._"
     )
 
-    howto_km_text = (
-        "📖 **របៀបប្រើប្រាស់ Bot Udom AI**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "📥 **ទាញយកវីដេអូ / អូឌីយ៉ូ**: ផ្ញើ link ទៅ Bot ផ្ទាល់\n"
-        "🔄 **បំលែងទ្រង់ទ្រាយ**: ផ្ញើឯកសារ ទៅ Bot\n"
-        "🎨 **បង្កើតរូបភាព AI**: វាយ `/image <រៀបរាប់រូបភាព>`\n"
-        "💬 **ចូលសន話ជាមួយ AI**: វាយសំណួរ ឬ ប្រធានបទណាមួយ\n"
-        "🔍 **ស្វែងរកលើអ៊ីនធឺណិត**: `/search <ប្រធានបទ>`\n"
-        "📄 **វិភាគឯកសារ**: ផ្ញើឯកសារ PDF, Word, Excel"
-    )
+    howto_km_text = ("📖 **របៀបប្រើប្រាស់ Bot Udom AI**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
-    howto_en_text = (
-        "📖 **How to Use Udom AI Bot**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "📥 **Download Video / Audio**: Send any media link directly\n"
-        "🔄 **Convert Media**: Send any video/audio/image file\n"
-        "🎨 **Generate AI Image**: Type `/image <description>`\n"
-        "💬 **Chat with AI**: Type any message or question\n"
-        "🔍 **Live Web Search**: Type `/search <query>`\n"
-        "📄 **Document Analysis**: Send PDF, Word, or Excel file"
-    )
+            "📥 **ទាញយកវីដេអូ / អូឌីយ៉ូ**\n"
+            "① ចម្លង link ពី YouTube, TikTok, Facebook, Instagram ជាដើម\n"
+            "② ផ្ញើ link ទៅ Bot ផ្ទាល់\n"
+            "③ Bot នឹងផ្ញើឯកសារ ឬ ជម្រើស ទាញយក\n"
+            "💡 ឬប្រើ: `/download https://youtube.com/...`\n\n"
+
+            "🔄 **បំលែងទ្រង់ទ្រាយ (Convert)**\n"
+            "① ផ្ញើឯកសារ (វីដេអូ / រូបភាព / អូឌីយ៉ូ) ទៅ Bot\n"
+            "② ចុចប៊ូតុង **🔄 Convert** ដែលលេចឡើង\n"
+            "③ ជ្រើសរើសទ្រង់ទ្រាយថ្មី (MP4, MP3, AVI, PNG...)\n\n"
+
+            "🎙 **ដាក់សំឡេងបកប្រែ (AI Voice Dubbing)**\n"
+            "① ផ្ញើឯកសារ ឬ link វីដេអូ\n"
+            "② ចុចប៊ូតុង **🎙 Voice Dub & Translate**\n"
+            "③ ជ្រើសរើសភាសាគោលដៅ (ខ្មែរ / អង់គ្លេស / ចិន...)\n"
+            "④ Bot នឹងផ្ញើវីដេអូមកវិញ ដែលមានសំឡេងបកប្រែ\n\n"
+
+            "📝 **សង្ខេបវីដេអូ (AI Recap)**\n"
+            "① ផ្ញើឯកសារ ឬ link វីដេអូ\n"
+            "② ចុចប៊ូតុង **📝 AI Video Recap**\n"
+            "③ ជ្រើសរើសភាសា — Bot នឹងបង្កើតសង្ខេបខ្លី 5-10 ប្រយោគ\n\n"
+
+            "🎬 **បង្កើតវីដេអូ AI (AI Video)**\n"
+            "① វាយ: /video ក្មេងប្រុសលេងបាល់ (Text → Video)\n"
+            "② ផ្ញើរូបភាព → ចុច **🎬 Make Video (Animate)**\n"
+            "③ ផ្ញើអូឌីយ៉ូ → ចុច **🎬 Make Video (Slideshow)**\n\n"
+
+            "🎨 **បង្កើតរូបភាព AI**\n"
+            "① វាយ: `generate image ព្រៃភ្នំ ពេលព្រឹក`\n"
+            "② ឬប្រើ: `/image a beautiful Cambodian temple at sunset`\n"
+            "③ Bot នឹងបង្កើតរូបភាព Full HD ភ្លាមៗ\n\n"
+
+            "💬 **ចូលសន話ជាមួយ AI**\n"
+            "① វាយសំណួរ ឬ ប្រធានបទណាមួយ\n"
+            "② Bot នឹងឆ្លើយតប ជាភាសាដែលអ្នកប្រើ\n"
+            "③ ផ្ញើរូបភាព ដើម្បីឱ្យ Bot វិភាគ ឬ ពិពណ៌នា\n\n"
+
+            "🔍 **ស្វែងរកលើអ៊ីនធឺណិត**\n"
+            "① `/search ប្រទេសកម្ពុជា` — Bot ស្វែងរក ហើយសង្ខេបលទ្ធផលភ្លាមៗ\n\n"
+
+            "📄 **វិភាគឯកសារ (PDF/Word/Excel)**\n"
+            "① ផ្ញើឯកសារ PDF, Word, Excel, PowerPoint\n"
+            "② Bot នឹងអានមាតិការ ហើយអ្នកអាចសួរសំណួរអំពីឯកសារ\n\n"
+
+            "⚠️ **ចំណាំ:**\n"
+            "• ប្រសិន Bot មិនឆ្លើយ → រង់ចាំ 1 នាទី ហើយផ្ញើម្ដងទៀត\n"
+            "• Bot នឹងឆ្លើយតបសំណូមពរដែលបាន queue ទុក ពេល server ចាប់ផ្ដើមឡើងវិញ")
+
+    howto_en_text = ("📖 **How to Use Udom AI Bot**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+            "📥 **Download Video / Audio**\n"
+            "① Copy a link from YouTube, TikTok, Facebook, Instagram, etc.\n"
+            "② Send the link directly to the bot\n"
+            "③ The bot will send download options or the file directly\n"
+            "💡 Or use: `/download https://youtube.com/...`\n\n"
+
+            "🔄 **Convert Media Format**\n"
+            "① Send a video, audio, or image file to the bot\n"
+            "② Tap the **🔄 Convert** button that appears\n"
+            "③ Choose a new format (MP4, MP3, AVI, WebM, PNG, JPG...)\n\n"
+
+            "🎙 **AI Voice Dubbing & Translation**\n"
+            "① Send a video file or link\n"
+            "② Tap **🎙 Voice Dub & Translate**\n"
+            "③ Choose the target language (Khmer / English / Chinese / French...)\n"
+            "④ The bot sends back the video with translated dubbed voice\n"
+            "   (original background music preserved at 20% volume)\n\n"
+
+            "📝 **AI Video Recap & Summary**\n"
+            "① Send a video/audio file or link\n"
+            "② Tap **📝 AI Video Recap**\n"
+            "③ Choose language — bot generates a short 5-10 sentence spoken summary\n\n"
+
+            "🎬 **Free AI Video Generator**\n"
+            "① Type: /video a dragon flying over a mountain (Text → Video)\n"
+            "② Send an image → Tap **🎬 Make Video (Animate)**\n"
+            "③ Send an audio → Tap **🎬 Make Video (Slideshow)**\n\n"
+
+            "🎨 **Generate AI Images**\n"
+            "① Type: `generate image a lion at sunset`\n"
+            "② Or use: `/image beautiful Angkor Wat at golden hour`\n"
+            "③ Bot generates a professional Full HD photo instantly\n"
+            "   (auto-detects: portrait / landscape / food / product / fantasy style)\n\n"
+
+            "💬 **Chat with AI**\n"
+            "① Just type any question or message\n"
+            "② The bot replies in the same language you used\n"
+            "③ Send a photo → bot analyzes and describes it\n"
+            "④ Send a voice message → bot transcribes and replies\n\n"
+
+            "🔍 **Live Web Search**\n"
+            "① `/search Cambodia tourism 2025` — bot searches + AI summary\n\n"
+
+            "📄 **Document Analysis (PDF/Word/Excel)**\n"
+            "① Send any PDF, Word (.docx), Excel (.xlsx) or PowerPoint file\n"
+            "② Bot reads the content — then ask any question about it\n\n"
+
+            "✂️ **Video Clipper**\n"
+            "① Send a video file\n"
+            "② Type a number (1–10) when prompted to split into equal clips\n\n"
+
+            "⚠️ **Tips:**\n"
+            "• If the bot doesn't reply → wait 1 min and retry\n"
+            "• After a server restart, the bot auto-replies to missed messages\n"
+            "• Use `/brainstats` to see how much the bot has learned\n"
+            "• Use `/train` to make the bot research & learn new topics now")
 
     while time.time() < end_time:
         try:

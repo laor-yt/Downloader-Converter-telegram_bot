@@ -206,7 +206,11 @@ async def handle_howto_guide(client, query):
             "• ប្រសិន Bot មិនឆ្លើយ → រង់ចាំ 1 នាទី ហើយផ្ញើម្ដងទៀត\n"
             "• Bot នឹងឆ្លើយតបសំណូមពរដែលបាន queue ទុក ពេល server ចាប់ផ្ដើមឡើងវិញ"
         )
-        await query.message.edit_text(guide, reply_markup=back_kb)
+        try:
+            await query.answer()
+            await query.message.edit_text(guide, reply_markup=back_kb, disable_web_page_preview=True)
+        except Exception as e:
+            print(f"Error editing howto_km: {e}")
 
     elif query.data == "howto_en":
         guide = (
@@ -270,7 +274,11 @@ async def handle_howto_guide(client, query):
             "• Use `/brainstats` to see how much the bot has learned\n"
             "• Use `/train` to make the bot research & learn new topics now"
         )
-        await query.message.edit_text(guide, reply_markup=back_kb)
+        try:
+            await query.answer()
+            await query.message.edit_text(guide, reply_markup=back_kb, disable_web_page_preview=True)
+        except Exception as e:
+            print(f"Error editing howto_en: {e}")
 
 
 @Client.on_callback_query(filters.regex("^start_menu$"))
