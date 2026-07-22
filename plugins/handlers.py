@@ -41,68 +41,239 @@ def is_url(text):
 async def start_command(client, message):
     welcome_message = (
         "👋 Welcome to the **Telegram AI Bot (Udom)**!\n\n"
-        "⚠️ **Note:** Please wait a minute and ask again if Bot does not reply to you.\n\n"
-        "To see all available commands, tap the Menu button or use the buttons below."
+        "🤖 Your all-in-one AI assistant: Download • Convert • Chat • Image Generator • Voice Dubbing • Recap\n\n"
+        "⚠️ **Note:** Please wait a moment and retry if the bot does not reply.\n\n"
+        "Choose an option below:"
     )
-    
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛠 Commands (Help)", callback_data="show_help")],
-        [InlineKeyboardButton("ℹ️ About", callback_data="show_about")]
+        [InlineKeyboardButton("🛠 Commands (Help)", callback_data="show_help"),
+         InlineKeyboardButton("ℹ️ About", callback_data="show_about")],
+        [InlineKeyboardButton("📖 How to Use / របៀបប្រើប្រាស់", callback_data="show_howto")]
     ])
-    
     from pyrogram.types import ReplyKeyboardRemove
-    # Send welcome with inline keyboard, and remove any leftover reply keyboard
     await message.reply_text(welcome_message, reply_markup=keyboard)
-    # Also send an invisible remove keyboard message just in case and delete it
     msg = await message.reply_text("Keyboard hidden.", reply_markup=ReplyKeyboardRemove(), disable_notification=True)
     await msg.delete()
-    
+
 @Client.on_message(filters.command(["help"]))
 async def help_command(client, message):
     help_text = (
-        "**Available Commands:**\n\n"
-        "📥 `/download <link>` - Download video/audio from YouTube, TikTok, etc.\n"
-        "🔄 `/convert` - Reply to or attach a media file to convert it.\n"
-        "💬 `/ask <question>` - Ask the AI a question.\n"
-        "🎨 `/image <prompt>` - Generate an image with AI.\n"
-        "🔍 `/search <query>` - Search the web with AI."
+        "**⚡ Available Commands:**\n\n"
+        "📥 `/download <link>` — Download video/audio from YouTube, TikTok, Facebook, Instagram & 1000+ sites\n"
+        "🔄 `/convert` — Send a file → convert format (MP4/MP3/AVI/WebM/JPG/PNG...)\n"
+        "💬 `/ask <question>` — Ask the AI anything (also works by just typing)\n"
+        "🎨 `/image <prompt>` — Generate professional Full HD AI photo\n"
+        "🔍 `/search <query>` — Live web search with AI summary\n"
+        "🧠 `/train` — Trigger bot self-learning research session\n"
+        "📊 `/brainstats` — View brain knowledge base stats\n"
+        "🕒 `/timezone +7` — Set your local timezone\n"
+        "📖 `/howto` — How to use this bot (Khmer/English guide)\n\n"
+        "_You can also just send any URL, file, photo or voice message directly!_"
     )
-    await message.reply_text(help_text)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📖 How to Use / របៀបប្រើប្រាស់", callback_data="show_howto")]
+    ])
+    await message.reply_text(help_text, reply_markup=keyboard)
 
-@Client.on_callback_query(filters.regex("^(show_help|show_about)$"))
+@Client.on_message(filters.command(["howto"]))
+async def howto_command(client, message):
+    """Show the How to Use language chooser."""
+    chooser = (
+        "📖 **How to Use / របៀបប្រើប្រាស់**\n\n"
+        "Please choose your language:\nសូមជ្រើសរើសភាសា:"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🇰🇭 ភាសាខ្មែរ (Khmer)", callback_data="howto_km")],
+        [InlineKeyboardButton("🇬🇧 English", callback_data="howto_en")]
+    ])
+    await message.reply_text(chooser, reply_markup=keyboard)
+
+
+@Client.on_callback_query(filters.regex("^(show_help|show_about|show_howto)$"))
 async def handle_start_menu(client, query):
     if query.data == "show_help":
         help_text = (
-            "**Available Commands:**\n\n"
-            "📥 `/download <link>` - Download video/audio from YouTube, TikTok, etc.\n"
-            "🔄 `/convert` - Reply to or attach a media file to convert it.\n"
-            "💬 `/ask <question>` - Ask the AI a question.\n"
-            "🎨 `/image <prompt>` - Generate an image with AI.\n"
-            "🔍 `/search <query>` - Search the web with AI."
+            "**⚡ Available Commands:**\n\n"
+            "📥 `/download <link>` — Download video/audio from YouTube, TikTok, Facebook, Instagram & 1000+ sites\n"
+            "🔄 `/convert` — Send a file → convert format (MP4/MP3/AVI/WebM/JPG/PNG...)\n"
+            "💬 `/ask <question>` — Ask the AI anything (also works by just typing)\n"
+            "🎨 `/image <prompt>` — Generate professional Full HD AI photo\n"
+            "🔍 `/search <query>` — Live web search with AI summary\n"
+            "🧠 `/train` — Trigger bot self-learning research session\n"
+            "📊 `/brainstats` — View brain knowledge base stats\n"
+            "🕒 `/timezone +7` — Set your local timezone\n"
+            "📖 `/howto` — How to use this bot (Khmer/English guide)\n\n"
+            "_You can also just send any URL, file, photo or voice message directly!_"
         )
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="start_menu")]])
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📖 How to Use", callback_data="show_howto")],
+            [InlineKeyboardButton("🔙 Back", callback_data="start_menu")]
+        ])
         await query.message.edit_text(help_text, reply_markup=keyboard)
-        
+
     elif query.data == "show_about":
         about_text = (
-            "**About This Bot**\n\n"
-            "This bot is a versatile tool for downloading, converting, and interacting with AI.\n\n"
-            "Developed to provide completely free, unlimited AI features, media conversion, and YouTube downloading directly within Telegram."
+            "**🤖 About Udom AI Bot**\n\n"
+            "An all-in-one free Telegram AI assistant with:\n"
+            "• 📥 Media downloader (1000+ sites)\n"
+            "• 🔄 Format converter (video/audio/image)\n"
+            "• 💬 AI chat (Gemini + GPT powered)\n"
+            "• 🎨 Professional AI image generator (FLUX)\n"
+            "• 🎙 AI Voice Dubbing & Translation\n"
+            "• 📝 AI Video/Audio Recap & Summary\n"
+            "• 🧠 Self-learning brain (auto-trains every 6h)\n"
+            "• 🔄 Missed message recovery (replies even after downtime)\n\n"
+            "_Built with ❤️ — 100% free, no limits._"
         )
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="start_menu")]])
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📖 How to Use", callback_data="show_howto")],
+            [InlineKeyboardButton("🔙 Back", callback_data="start_menu")]
+        ])
         await query.message.edit_text(about_text, reply_markup=keyboard)
+
+    elif query.data == "show_howto":
+        howto_chooser = (
+            "📖 **How to Use / របៀបប្រើប្រាស់**\n\n"
+            "Please choose your language:\nសូមជ្រើសរើសភាសា:"
+        )
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🇰🇭 ភាសាខ្មែរ (Khmer)", callback_data="howto_km")],
+            [InlineKeyboardButton("🇬🇧 English", callback_data="howto_en")],
+            [InlineKeyboardButton("🔙 Back", callback_data="start_menu")]
+        ])
+        await query.message.edit_text(howto_chooser, reply_markup=keyboard)
+
+
+@Client.on_callback_query(filters.regex("^(howto_km|howto_en)$"))
+async def handle_howto_guide(client, query):
+    back_kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 ត្រឡប់ / Back", callback_data="show_howto")]
+    ])
+
+    if query.data == "howto_km":
+        guide = (
+            "📖 **របៀបប្រើប្រាស់ Bot Udom AI**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+            "📥 **ទាញយកវីដេអូ / អូឌីយ៉ូ**\n"
+            "① ចម្លង link ពី YouTube, TikTok, Facebook, Instagram ជាដើម\n"
+            "② ផ្ញើ link ទៅ Bot ផ្ទាល់\n"
+            "③ Bot នឹងផ្ញើឯកសារ ឬ ជម្រើស ទាញយក\n"
+            "💡 ឬប្រើ: `/download https://youtube.com/...`\n\n"
+
+            "🔄 **បំលែងទ្រង់ទ្រាយ (Convert)**\n"
+            "① ផ្ញើឯកសារ (វីដេអូ / រូបភាព / អូឌីយ៉ូ) ទៅ Bot\n"
+            "② ចុចប៊ូតុង **🔄 Convert** ដែលលេចឡើង\n"
+            "③ ជ្រើសរើសទ្រង់ទ្រាយថ្មី (MP4, MP3, AVI, PNG...)\n\n"
+
+            "🎙 **ដាក់សំឡេងបកប្រែ (AI Voice Dubbing)**\n"
+            "① ផ្ញើឯកសារ ឬ link វីដេអូ\n"
+            "② ចុចប៊ូតុង **🎙 Voice Dub & Translate**\n"
+            "③ ជ្រើសរើសភាសាគោលដៅ (ខ្មែរ / អង់គ្លេស / ចិន...)\n"
+            "④ Bot នឹងផ្ញើវីដេអូមកវិញ ដែលមានសំឡេងបកប្រែ\n\n"
+
+            "📝 **សង្ខេបវីដេអូ (AI Recap)**\n"
+            "① ផ្ញើឯកសារ ឬ link វីដេអូ\n"
+            "② ចុចប៊ូតុង **📝 AI Video Recap**\n"
+            "③ ជ្រើសរើសភាសា — Bot នឹងបង្កើតសង្ខេបខ្លី 5-10 ប្រយោគ\n\n"
+
+            "🎨 **បង្កើតរូបភាព AI**\n"
+            "① វាយ: `generate image ព្រៃភ្នំ ពេលព្រឹក`\n"
+            "② ឬប្រើ: `/image a beautiful Cambodian temple at sunset`\n"
+            "③ Bot នឹងបង្កើតរូបភាព Full HD ភ្លាមៗ\n\n"
+
+            "💬 **ចូលសន話ជាមួយ AI**\n"
+            "① វាយសំណួរ ឬ ប្រធានបទណាមួយ\n"
+            "② Bot នឹងឆ្លើយតប ជាភាសាដែលអ្នកប្រើ\n"
+            "③ ផ្ញើរូបភាព ដើម្បីឱ្យ Bot វិភាគ ឬ ពិពណ៌នា\n\n"
+
+            "🔍 **ស្វែងរកលើអ៊ីនធឺណិត**\n"
+            "① `/search ប្រទេសកម្ពុជា` — Bot ស្វែងរក ហើយសង្ខេបលទ្ធផលភ្លាមៗ\n\n"
+
+            "📄 **វិភាគឯកសារ (PDF/Word/Excel)**\n"
+            "① ផ្ញើឯកសារ PDF, Word, Excel, PowerPoint\n"
+            "② Bot នឹងអានមាតិការ ហើយអ្នកអាចសួរសំណួរអំពីឯកសារ\n\n"
+
+            "⚠️ **ចំណាំ:**\n"
+            "• ប្រសិន Bot មិនឆ្លើយ → រង់ចាំ 1 នាទី ហើយផ្ញើម្ដងទៀត\n"
+            "• Bot នឹងឆ្លើយតបសំណូមពរដែលបាន queue ទុក ពេល server ចាប់ផ្ដើមឡើងវិញ"
+        )
+        await query.message.edit_text(guide, reply_markup=back_kb)
+
+    elif query.data == "howto_en":
+        guide = (
+            "📖 **How to Use Udom AI Bot**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+            "📥 **Download Video / Audio**\n"
+            "① Copy a link from YouTube, TikTok, Facebook, Instagram, etc.\n"
+            "② Send the link directly to the bot\n"
+            "③ The bot will send download options or the file directly\n"
+            "💡 Or use: `/download https://youtube.com/...`\n\n"
+
+            "🔄 **Convert Media Format**\n"
+            "① Send a video, audio, or image file to the bot\n"
+            "② Tap the **🔄 Convert** button that appears\n"
+            "③ Choose a new format (MP4, MP3, AVI, WebM, PNG, JPG...)\n\n"
+
+            "🎙 **AI Voice Dubbing & Translation**\n"
+            "① Send a video file or link\n"
+            "② Tap **🎙 Voice Dub & Translate**\n"
+            "③ Choose the target language (Khmer / English / Chinese / French...)\n"
+            "④ The bot sends back the video with translated dubbed voice\n"
+            "   (original background music preserved at 20% volume)\n\n"
+
+            "📝 **AI Video Recap & Summary**\n"
+            "① Send a video/audio file or link\n"
+            "② Tap **📝 AI Video Recap**\n"
+            "③ Choose language — bot generates a short 5-10 sentence spoken summary\n\n"
+
+            "🎨 **Generate AI Images**\n"
+            "① Type: `generate image a lion at sunset`\n"
+            "② Or use: `/image beautiful Angkor Wat at golden hour`\n"
+            "③ Bot generates a professional Full HD photo instantly\n"
+            "   (auto-detects: portrait / landscape / food / product / fantasy style)\n\n"
+
+            "💬 **Chat with AI**\n"
+            "① Just type any question or message\n"
+            "② The bot replies in the same language you used\n"
+            "③ Send a photo → bot analyzes and describes it\n"
+            "④ Send a voice message → bot transcribes and replies\n\n"
+
+            "🔍 **Live Web Search**\n"
+            "① `/search Cambodia tourism 2025` — bot searches + AI summary\n\n"
+
+            "📄 **Document Analysis (PDF/Word/Excel)**\n"
+            "① Send any PDF, Word (.docx), Excel (.xlsx) or PowerPoint file\n"
+            "② Bot reads the content — then ask any question about it\n\n"
+
+            "✂️ **Video Clipper**\n"
+            "① Send a video file\n"
+            "② Type a number (1–10) when prompted to split into equal clips\n\n"
+
+            "⚠️ **Tips:**\n"
+            "• If the bot doesn't reply → wait 1 min and retry\n"
+            "• After a server restart, the bot auto-replies to missed messages\n"
+            "• Use `/brainstats` to see how much the bot has learned\n"
+            "• Use `/train` to make the bot research & learn new topics now"
+        )
+        await query.message.edit_text(guide, reply_markup=back_kb)
+
 
 @Client.on_callback_query(filters.regex("^start_menu$"))
 async def handle_back_to_start(client, query):
     welcome_message = (
-        "👋 Welcome to the **Telegram AI Bot**!\n\n"
-        "To see all available commands, tap the Menu button or use the buttons below."
+        "👋 Welcome to the **Telegram AI Bot (Udom)**!\n\n"
+        "🤖 Your all-in-one AI assistant: Download • Convert • Chat • Image Generator • Voice Dubbing • Recap\n\n"
+        "Choose an option below:"
     )
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛠 Commands (Help)", callback_data="show_help")],
-        [InlineKeyboardButton("ℹ️ About", callback_data="show_about")]
+        [InlineKeyboardButton("🛠 Commands (Help)", callback_data="show_help"),
+         InlineKeyboardButton("ℹ️ About", callback_data="show_about")],
+        [InlineKeyboardButton("📖 How to Use / របៀបប្រើប្រាស់", callback_data="show_howto")]
     ])
     await query.message.edit_text(welcome_message, reply_markup=keyboard)
+
 
 @Client.on_message(filters.regex("^(📥 Download Media|🔄 Convert Media)$"))
 async def handle_menu(client, message):
