@@ -8,12 +8,25 @@ from ddgs import DDGS
 # Store recent conversation history per chat for context
 chat_history = {}
 
+from datetime import datetime, timezone, timedelta
+
+# Default timezone for Udom (UTC+7 / ICT, e.g. Cambodia, Thailand, Vietnam)
+DEFAULT_TZ_OFFSET = 7
+user_timezones = {}
+
+def get_user_current_time(chat_id):
+    offset = user_timezones.get(chat_id, DEFAULT_TZ_OFFSET)
+    tz = timezone(timedelta(hours=offset))
+    now = datetime.now(tz)
+    return now.strftime("%A, %B %d, %Y at %I:%M %p") + f" (UTC{'+' if offset >= 0 else ''}{offset}:00)"
+
 SYSTEM_PROMPT = """Your name is Udom. You are a highly capable, intelligent AI assistant created to help users with questions, media, and search.
 You are fully fluent in English and Khmer.
 - If the user asks in English, you MUST answer in English.
 - If the user asks in Khmer, you MUST answer in Khmer.
 - If the user asks you to translate something to Khmer, you MUST answer in Khmer.
 - Always introduce or identify yourself as Udom when asked who you are.
+- Always use the current local time provided in context when answering time or date questions.
 
 CRITICAL INSTRUCTION FOR IMAGES:
 You have a special built-in image generator. If the user asks you to generate, draw, or create an image/picture, DO NOT apologize and DO NOT say you reached a limit. You MUST reply with this exact URL format and NOTHING else:
@@ -25,14 +38,17 @@ If the user asks for a video, you must reply: "Sorry, I cannot generate videos b
 """
 
 async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):
+    current_time_str = get_user_current_time(chat_id)
+    
     # Initialize history for chat if not exists
     if chat_id not in chat_history:
         chat_history[chat_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
     
-    # Add user message to history
-    final_prompt = user_prompt
+    # Add user message to history with local time context
+    time_prefix = f"[Current User Local Time: {current_time_str}]"
+    final_prompt = f"{time_prefix}\n{user_prompt}"
     if context:
-        final_prompt = f"Context information:\n{context}\n\nUser Prompt:\n{user_prompt}"
+        final_prompt = f"{time_prefix}\nContext information:\n{context}\n\nUser Prompt:\n{user_prompt}"
         
     if image_url:
         message_content = f"{final_prompt}\n\nImage URL: {image_url}"
@@ -125,6 +141,30 @@ async def image_command(client: Client, message: Message):
         await processing_msg.delete()
     except:
         await processing_msg.edit_text("Sorry, failed to generate or fetch the image.")
+
+@Client.on_message(filters.command("timezone"), group=1)
+async def timezone_command(client: Client, message: Message):
+    chat_id = message.chat.id
+    if len(message.command) < 2:
+        current_time = get_user_current_time(chat_id)
+        await message.reply_text(
+            f"🕒 **Current Configured Timezone:**\n{current_time}\n\n"
+            "To change your timezone, use `/timezone <offset>`\n"
+            "Example: `/timezone +7` for ICT (Cambodia/Thailand) or `/timezone -5` for EST."
+        )
+        return
+        
+    offset_str = message.command[1].replace("UTC", "").replace("utc", "").replace("+", "")
+    try:
+        offset = int(offset_str)
+        if -12 <= offset <= 14:
+            user_timezones[chat_id] = offset
+            current_time = get_user_current_time(chat_id)
+            await message.reply_text(f"✅ Timezone updated to UTC{'+' if offset >= 0 else ''}{offset}:00!\nYour local time is now: **{current_time}**")
+        else:
+            await message.reply_text("Please enter a valid timezone offset between -12 and +14 (e.g., `/timezone +7`).")
+    except ValueError:
+        await message.reply_text("Invalid format. Example: `/timezone +7` or `/timezone -5`.")
 
 @Client.on_message(filters.command("search"), group=1)
 async def search_command(client: Client, message: Message):
