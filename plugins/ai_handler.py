@@ -191,6 +191,16 @@ async def private_ai_chat(client: Client, message: Message):
         return
         
     prompt = text
+    if message.reply_to_message and "Ask Udom about this link:" in (message.reply_to_message.text or ""):
+        rep_text = message.reply_to_message.text
+        extracted_url = ""
+        for w in rep_text.split():
+            if "http://" in w or "https://" in w:
+                extracted_url = w.strip("`")
+                break
+        if extracted_url:
+            prompt = f"Context Link: {extracted_url}\n\nUser Request: {text}"
+
     processing_msg = await message.reply_text("🤔 Thinking...", reply_to_message_id=message.id)
     reply = await get_ai_response(message.chat.id, prompt)
     

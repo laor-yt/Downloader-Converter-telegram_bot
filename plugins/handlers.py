@@ -108,11 +108,11 @@ async def download_command(client, message):
     
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Download Video", callback_data=f"dl_vid|{short_id}"),
-            InlineKeyboardButton("Download Audio", callback_data=f"dl_aud|{short_id}")
+            InlineKeyboardButton("📥 Download", callback_data=f"url_show_dl|{short_id}"),
+            InlineKeyboardButton("🤖 Ask AI", callback_data=f"url_show_ask|{short_id}")
         ]
     ])
-    await message.reply_text("Link detected. What would you like to do?", reply_markup=keyboard)
+    await message.reply_text(f"🔗 **Link Detected:** `{url}`\nWhat would you like to do?", reply_markup=keyboard)
 
 # Automatic URL detector: Automatically shows download buttons whenever a user pastes a link
 @Client.on_message(filters.text & filters.private & ~filters.command(["download", "convert", "start", "help", "ask", "image", "search"]), group=0)
@@ -132,8 +132,8 @@ async def auto_url_and_menu_handler(client, message):
         url_cache[short_id] = found_url
         keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("🎬 Download Video", callback_data=f"dl_vid|{short_id}"),
-                InlineKeyboardButton("🎵 Download Audio", callback_data=f"dl_aud|{short_id}")
+                InlineKeyboardButton("📥 Download", callback_data=f"url_show_dl|{short_id}"),
+                InlineKeyboardButton("🤖 Ask AI", callback_data=f"url_show_ask|{short_id}")
             ]
         ])
         await message.reply_text(f"🔗 **Link Detected:** `{found_url}`\nWhat would you like to do?", reply_markup=keyboard)
@@ -267,6 +267,50 @@ async def button_callback(client, callback_query):
             pass
         await client.send_message(query_msg.chat.id, welcome_message, reply_markup=keyboard)
         
+    elif data.startswith("url_show_main|"):
+        _, short_id = data.split("|")
+        url = url_cache.get(short_id)
+        if not url:
+            await callback_query.answer("Session expired. Please send the link again.", show_alert=True)
+            return
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("📥 Download", callback_data=f"url_show_dl|{short_id}"),
+                InlineKeyboardButton("🤖 Ask AI", callback_data=f"url_show_ask|{short_id}")
+            ]
+        ])
+        await safe_edit_text(query_msg, f"🔗 **Link Detected:** `{url}`\nWhat would you like to do?", reply_markup=keyboard)
+
+    elif data.startswith("url_show_dl|"):
+        _, short_id = data.split("|")
+        url = url_cache.get(short_id)
+        if not url:
+            await callback_query.answer("Session expired. Please send the link again.", show_alert=True)
+            return
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🎬 Download Video", callback_data=f"dl_vid|{short_id}"),
+                InlineKeyboardButton("🎵 Download Audio", callback_data=f"dl_aud|{short_id}")
+            ],
+            [
+                InlineKeyboardButton("🔙 Back", callback_data=f"url_show_main|{short_id}")
+            ]
+        ])
+        await safe_edit_text(query_msg, f"📥 **Download Options for:** `{url}`", reply_markup=keyboard)
+
+    elif data.startswith("url_show_ask|"):
+        _, short_id = data.split("|")
+        url = url_cache.get(short_id)
+        if not url:
+            await callback_query.answer("Session expired. Please send the link again.", show_alert=True)
+            return
+        from pyrogram.types import ForceReply
+        await client.send_message(
+            query_msg.chat.id,
+            f"🤖 **Ask Udom about this link:** `{url}`\n\nPlease reply directly to this message with what you want Udom to do for you:",
+            reply_markup=ForceReply(selective=True)
+        )
+
     elif data.startswith("ask_ai|"):
         _, short_id = data.split("|")
         original_msg = url_cache.get(short_id)
