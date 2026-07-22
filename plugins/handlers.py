@@ -404,6 +404,27 @@ async def button_callback(client, callback_query):
         ])
         await safe_edit_text(query_msg, "🎙 **Choose target language for Voice Dubbing:**", reply_markup=keyboard)
 
+    elif data.startswith("file_show_recap|"):
+        _, short_id = data.split("|")
+        original_msg = url_cache.get(short_id)
+        if not original_msg:
+            await callback_query.answer("Session expired. Please send the file again.", show_alert=True)
+            return
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🇰🇭 Khmer", callback_data=f"recap_file|{short_id}|km"),
+                InlineKeyboardButton("🇬🇧 English", callback_data=f"recap_file|{short_id}|en"),
+                InlineKeyboardButton("🇨🇳 Chinese", callback_data=f"recap_file|{short_id}|zh")
+            ],
+            [
+                InlineKeyboardButton("🇫🇷 French", callback_data=f"recap_file|{short_id}|fr"),
+                InlineKeyboardButton("🇪🇸 Spanish", callback_data=f"recap_file|{short_id}|es"),
+                InlineKeyboardButton("🇯🇵 Japanese", callback_data=f"recap_file|{short_id}|ja")
+            ],
+            [InlineKeyboardButton("🔙 Back", callback_data=f"file_show_conv|{short_id}")]
+        ])
+        await safe_edit_text(query_msg, "📝 **Choose target language for AI Video Recap & Voiceover:**", reply_markup=keyboard)
+
     elif data.startswith("file_show_ask|"):
         _, short_id = data.split("|")
         original_msg = url_cache.get(short_id)
@@ -481,6 +502,27 @@ async def button_callback(client, callback_query):
             [InlineKeyboardButton("🔙 Back", callback_data=f"url_show_dl|{short_id}")]
         ])
         await safe_edit_text(query_msg, f"🎙 **Choose target language for Voice Dubbing:**\n`{url}`", reply_markup=keyboard)
+
+    elif data.startswith("url_show_recap|"):
+        _, short_id = data.split("|")
+        url = url_cache.get(short_id)
+        if not url:
+            await callback_query.answer("Session expired. Please send the link again.", show_alert=True)
+            return
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🇰🇭 Khmer", callback_data=f"recap_url|{short_id}|km"),
+                InlineKeyboardButton("🇬🇧 English", callback_data=f"recap_url|{short_id}|en"),
+                InlineKeyboardButton("🇨🇳 Chinese", callback_data=f"recap_url|{short_id}|zh")
+            ],
+            [
+                InlineKeyboardButton("🇫🇷 French", callback_data=f"recap_url|{short_id}|fr"),
+                InlineKeyboardButton("🇪🇸 Spanish", callback_data=f"recap_url|{short_id}|es"),
+                InlineKeyboardButton("🇯🇵 Japanese", callback_data=f"recap_url|{short_id}|ja")
+            ],
+            [InlineKeyboardButton("🔙 Back", callback_data=f"url_show_dl|{short_id}")]
+        ])
+        await safe_edit_text(query_msg, f"📝 **Choose target language for AI Video Recap & Voiceover:**\n`{url}`", reply_markup=keyboard)
 
     elif data.startswith("url_show_clip|"):
         _, short_id = data.split("|")
