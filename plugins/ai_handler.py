@@ -571,6 +571,8 @@ async def search_command(client: Client, message: Message):
 # Handle mentions and replies to the bot in groups
 @Client.on_message(filters.text & filters.group & ~filters.command(["start", "help", "ask", "search", "image", "video", "download", "convert", "finance", "market"]), group=1)
 async def group_ai_chat(client: Client, message: Message):
+    if getattr(message.from_user, "is_self", False) or getattr(message, "outgoing", False):
+        return
     bot = await client.get_me()
     
     is_reply_to_bot = (
@@ -598,6 +600,8 @@ async def group_ai_chat(client: Client, message: Message):
 # Handle AI chat in private messages (if it's not a URL or command)
 @Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "ask", "search", "image", "video", "download", "convert", "finance", "market"]), group=1)
 async def private_ai_chat(client: Client, message: Message):
+    if getattr(message.from_user, "is_self", False) or getattr(message, "outgoing", False):
+        return
     text = message.text
     # Ignore predefined menu buttons
     if text in ["📥 Download Media", "🔄 Convert Media", "ℹ️ Help"]:

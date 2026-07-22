@@ -330,6 +330,8 @@ async def download_command(client, message):
 # Automatic URL detector: Automatically shows download buttons whenever a user pastes a link
 @Client.on_message(filters.text & filters.private & ~filters.command(["download", "convert", "start", "help", "ask", "image", "search"]), group=0)
 async def auto_url_and_menu_handler(client, message):
+    if getattr(message.from_user, "is_self", False) or getattr(message, "outgoing", False):
+        return
     text = message.text.strip()
     
     # 1. If text contains a URL, trigger download menu automatically
@@ -374,6 +376,8 @@ async def convert_command(client, message):
 
 @Client.on_message(filters.photo | filters.video | filters.audio | filters.voice | filters.document)
 async def handle_media(client, message):
+    if getattr(message.from_user, "is_self", False) or getattr(message, "outgoing", False):
+        return
     target_msg = message
 
     file_id = None
