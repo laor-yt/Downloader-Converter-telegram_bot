@@ -236,19 +236,18 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
     
     if is_video:
         try:
-            # Loop video to match full speech audio duration without freezing or voice distortion
-            stream = (
-                ffmpeg
-                .output(
-                    ffmpeg.input(input_path, stream_loop=-1).video,
-                    ffmpeg.input(final_audio_track).audio,
-                    output_path,
-                    vcodec='copy',
-                    acodec='aac',
-                    shortest=None
-                )
-                .overwrite_output()
-            )
+            orig_dur = get_video_duration(input_path)
+            tts_dur = get_video_duration(final_audio_track)
+            target_dur = max(orig_dur, tts_dur) if (orig_dur > 0 or tts_dur > 0) else None
+            
+            video_input = ffmpeg.input(input_path, stream_loop=-1).video if (orig_dur > 0 and tts_dur > orig_dur) else ffmpeg.input(input_path).video
+            audio_input = ffmpeg.input(final_audio_track).audio
+            
+            out_opts = {'vcodec': 'copy', 'acodec': 'aac'}
+            if target_dur and target_dur > 0:
+                out_opts['t'] = target_dur
+                
+            stream = ffmpeg.output(video_input, audio_input, output_path, **out_opts).overwrite_output()
             res = _run_ffmpeg_with_progress(stream, output_path, progress_callback)
         except Exception as e:
             print(f"FFmpeg Merge Error: {e}")
@@ -351,18 +350,18 @@ def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=Fal
     
     if is_video:
         try:
-            stream = (
-                ffmpeg
-                .output(
-                    ffmpeg.input(input_path, stream_loop=-1).video,
-                    ffmpeg.input(final_audio).audio,
-                    output_path,
-                    vcodec='copy',
-                    acodec='aac',
-                    shortest=None
-                )
-                .overwrite_output()
-            )
+            orig_dur = get_video_duration(input_path)
+            tts_dur = get_video_duration(final_audio)
+            target_dur = max(orig_dur, tts_dur) if (orig_dur > 0 or tts_dur > 0) else None
+            
+            video_input = ffmpeg.input(input_path, stream_loop=-1).video if (orig_dur > 0 and tts_dur > orig_dur) else ffmpeg.input(input_path).video
+            audio_input = ffmpeg.input(final_audio).audio
+            
+            out_opts = {'vcodec': 'copy', 'acodec': 'aac'}
+            if target_dur and target_dur > 0:
+                out_opts['t'] = target_dur
+                
+            stream = ffmpeg.output(video_input, audio_input, output_path, **out_opts).overwrite_output()
             res_media = _run_ffmpeg_with_progress(stream, output_path, progress_callback)
         except Exception as e:
             print(f"FFmpeg Recap Merge Error: {e}")
@@ -377,6 +376,20 @@ def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=Fal
     return recap_text, res_media
 
 def get_video_duration(file_path):
+    """Accurately extracts video or audio duration in seconds using imageio_ffmpeg or ffprobe."""
+    try:
+        import subprocess
+        import re
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        cmd = [ffmpeg_exe, "-i", file_path]
+        res = subprocess.run(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="ignore")
+        match = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", res.stderr)
+        if match:
+            hours, minutes, seconds = match.groups()
+            return float(hours) * 3600 + float(minutes) * 60 + float(seconds)
+    except Exception as e:
+        print(f"Error getting duration with imageio_ffmpeg: {e}")
+        
     try:
         probe = ffmpeg.probe(file_path)
         return float(probe['format']['duration'])
