@@ -80,35 +80,11 @@ def main():
             logger.error(f"Failed to start Pyrogram client: {e}")
             raise e
 
-    # ── Recover missed messages from while the bot was offline ────────────
-    async def run_recovery():
+    # ── Non-blocking background startup tasks ────────────────────────────────
+    async def post_startup_tasks():
+        # 1. Set bot commands & descriptions
         try:
-            from plugins.recovery import recover_missed_messages
-            logger.info("[Recovery] Checking for missed messages...")
-            await recover_missed_messages(token)
-        except Exception as e:
-            logger.error(f"[Recovery] Error during startup recovery: {e}")
-
-    app.loop.run_until_complete(run_recovery())
-
-    # ── Start self-learning brain background loop ──────────────────────────
-    async def start_brain_loop():
-        try:
-            from plugins.brain import auto_training_loop, bot_brain
-            stats = bot_brain.stats()
-            if stats["total_facts"] == 0:
-                logger.info("[Brain] First run — starting initial research session...")
-                await bot_brain.auto_research(limit=3)
-                logger.info(f"[Brain] Initial research complete. {bot_brain.stats()['total_facts']} facts stored.")
-            app.loop.create_task(auto_training_loop())
-            logger.info("[Brain] Auto-training loop started (every 6 hours).")
-        except Exception as e:
-            logger.error(f"[Brain] Failed to start training loop: {e}")
-
-    app.loop.run_until_complete(start_brain_loop())
-    async def set_commands():
-        from pyrogram.types import BotCommand
-        try:
+            from pyrogram.types import BotCommand
             await app.set_bot_commands([
                 BotCommand("start", "Start the bot"),
                 BotCommand("download", "Download media from a link"),
@@ -125,17 +101,34 @@ def main():
             ])
             import requests
             desc = "👋 Welcome to Telegram AI Bot (Udom)!\n\n⚠️ Note: Please wait a minute and ask again if Bot does not reply to you."
-            requests.post(f"https://api.telegram.org/bot{token}/setMyDescription", json={"description": desc})
-            requests.post(f"https://api.telegram.org/bot{token}/setMyShortDescription", json={"short_description": "Telegram AI Bot (Udom) - Please wait a minute and ask again if Bot does not reply."})
-            logger.info("Bot commands and description set successfully!")
+            requests.post(f"https://api.telegram.org/bot{token}/setMyDescription", json={"description": desc}, timeout=10)
+            requests.post(f"https://api.telegram.org/bot{token}/setMyShortDescription", json={"short_description": "Telegram AI Bot (Udom) - Please wait a minute and ask again if Bot does not reply."}, timeout=10)
+            logger.info("[Startup] Bot commands & descriptions updated.")
         except Exception as e:
-            logger.error(f"Failed to set bot commands: {e}")
-            
-    app.loop.run_until_complete(set_commands())
-    
+            logger.error(f"[Startup] Error setting commands: {e}")
+
+        # 2. Recover missed messages from while bot was offline
+        try:
+            from plugins.recovery import recover_missed_messages
+            logger.info("[Recovery] Checking for missed messages...")
+            await recover_missed_messages(token)
+        except Exception as e:
+            logger.error(f"[Recovery] Error during recovery: {e}")
+
+        # 3. Start self-learning brain background loop
+        try:
+            from plugins.brain import auto_training_loop
+            app.loop.create_task(auto_training_loop())
+            logger.info("[Brain] Auto-training loop active.")
+        except Exception as e:
+            logger.error(f"[Brain] Error starting brain loop: {e}")
+
+    # Launch background tasks asynchronously so idle() starts immediately
+    app.loop.create_task(post_startup_tasks())
+
+    logger.info("⚡ Bot is online and listening for messages!")
     import pyrogram
     pyrogram.idle()
-    
     app.stop()
 
 if __name__ == "__main__":
