@@ -13,6 +13,10 @@ WORKDIR /app
 # Copy requirement files and install python dependencies
 COPY requirements.txt .
 ENV PIP_ROOT_USER_ACTION=ignore
+ENV MAX_JOBS=2
+ENV CMAKE_BUILD_PARALLEL_LEVEL=2
+
+RUN pip install --no-cache-dir llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/wheels/cpu || pip install --no-cache-dir llama-cpp-python
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir -U yt-dlp
 
