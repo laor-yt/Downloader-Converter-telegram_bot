@@ -60,43 +60,68 @@ def parse_document(file_path: str, mime_type: str) -> str:
 
 
 def transcribe_audio_video(file_path: str) -> str:
-    """Extracts audio and transcribes 100% of spoken speech with high precision and performance."""
+    """Extracts audio and transcribes 100% of spoken speech for media up to 3 hours in duration."""
     temp_wav = f"temp_{uuid.uuid4().hex}.wav"
     temp_mp3 = f"temp_{uuid.uuid4().hex}.mp3"
     
     try:
-        # Extract audio track to lightweight format
+        # Extract audio track to lightweight 32k mono format
         audio = AudioSegment.from_file(file_path)
-        audio_mono = audio.set_frame_rate(16000).set_channels(1)
-        audio_mono.export(temp_mp3, format="mp3", bitrate="64k")
         
-        # 1. Try Gemini 1.5 Flash Vision / Audio AI with lightweight audio track
+        # Limit max duration to 3 hours (10,800,000 ms = 180 minutes)
+        max_3hr_ms = 3 * 3600 * 1000
+        if len(audio) > max_3hr_ms:
+            audio = audio[:max_3hr_ms]
+            
+        audio_mono = audio.set_frame_rate(16000).set_channels(1)
+        audio_mono.export(temp_mp3, format="mp3", bitrate="32k")
+        
+        # 1. Try Gemini 1.5 Flash Vision / Audio AI
         api_key = os.environ.get("GEMINI_API_KEY")
         if api_key and os.path.exists(temp_mp3):
             try:
                 import base64
                 import requests
-                with open(temp_mp3, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode("utf-8")
+                
+                # If audio is very long (>30 min), split into 30-minute parts for Gemini REST payload
+                gemini_transcripts = []
+                part_duration_ms = 30 * 60 * 1000  # 30 mins
+                total_len = len(audio_mono)
+                
+                for p_start in range(0, total_len, part_duration_ms):
+                    part_audio = audio_mono[p_start : min(p_start + part_duration_ms, total_len)]
+                    temp_part = f"temp_part_{uuid.uuid4().hex}.mp3"
+                    part_audio.export(temp_part, format="mp3", bitrate="32k")
                     
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-                payload = {
-                    "contents": [{
-                        "parts": [
-                            {"text": "Transcribe 100% of ALL spoken words in this audio/video media with exact precision. Do not skip any sentence or word. Output ONLY the raw spoken transcript text."},
-                            {"inline_data": {"mime_type": "audio/mp3", "data": b64}}
-                        ]
-                    }]
-                }
-                res = requests.post(url, json=payload, timeout=60).json()
-                if "candidates" in res and res["candidates"]:
-                    text = res["candidates"][0]["content"]["parts"][0]["text"].strip()
-                    if text and len(text) > 3:
-                        return text
+                    try:
+                        with open(temp_part, "rb") as f:
+                            b64 = base64.b64encode(f.read()).decode("utf-8")
+                            
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+                        payload = {
+                            "contents": [{
+                                "parts": [
+                                    {"text": "Transcribe 100% of ALL spoken words in this audio with exact precision. Do not skip any sentence or word. Output ONLY the raw spoken transcript text."},
+                                    {"inline_data": {"mime_type": "audio/mp3", "data": b64}}
+                                ]
+                            }]
+                        }
+                        res = requests.post(url, json=payload, timeout=90).json()
+                        if "candidates" in res and res["candidates"]:
+                            p_text = res["candidates"][0]["content"]["parts"][0]["text"].strip()
+                            if p_text:
+                                gemini_transcripts.append(p_text)
+                    finally:
+                        if os.path.exists(temp_part):
+                            os.remove(temp_part)
+                            
+                full_gemini_text = " ".join(gemini_transcripts).strip()
+                if full_gemini_text and len(full_gemini_text) > 3:
+                    return full_gemini_text
             except Exception as e:
-                print(f"Gemini Audio Transcription Error: {e}")
+                print(f"Gemini Multi-part Audio Transcription Error: {e}")
 
-        # 2. Multi-language Chunked Google SpeechRecognition Fallback (Transcribes ALL chunks 100%)
+        # 2. Multi-language Chunked Google SpeechRecognition Fallback (Transcribes up to 3 hours)
         audio_mono.export(temp_wav, format="wav")
         recognizer = sr.Recognizer()
         
