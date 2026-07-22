@@ -118,11 +118,53 @@ async def ask_command(client: Client, message: Message):
     processing_msg = await message.reply_text("🤔 Thinking...")
     reply = await get_ai_response(message.chat.id, prompt)
     
-    if "image.pollinations.ai" in reply:
-        await message.reply_photo(reply.strip())
-        await processing_msg.delete()
-    else:
-        await processing_msg.edit_text(reply)
+    await send_ai_reply_or_photo(message, processing_msg, reply, prompt_text=prompt)
+import urllib.parse
+import re
+
+def clean_and_generate_image_url(raw_prompt):
+    p = raw_prompt.strip()
+    p_lower = p.lower()
+    
+    prefixes = [
+        "generate image", "generat image", "generate photo", "generate picture",
+        "draw image", "draw picture", "draw photo", "draw a", "draw me", "draw",
+        "create image", "create photo", "create picture", "create a",
+        "make image", "make photo", "make picture", "make a",
+        "picture of", "photo of", "image of"
+    ]
+    for pref in prefixes:
+        if p_lower.startswith(pref):
+            p = p[len(pref):].strip()
+            break
+            
+    p = p.lstrip(": ,-")
+    if not p:
+        p = "beautiful high quality masterpiece"
+        
+    enhanced_prompt = f"{p}, 8k resolution, photorealistic, masterpiece, highly detailed, professional photography, realistic"
+    encoded_prompt = urllib.parse.quote(enhanced_prompt)
+    
+    return f"https://image.pollinations.ai/prompt/{encoded_prompt}?model=flux&width=1024&height=1024&nologo=true&enhance=true"
+
+def extract_image_url(text):
+    match = re.search(r'https?://image\.pollinations\.ai/prompt/[^\s\)\>\]]+', text)
+    if match:
+        return match.group(0)
+    return None
+
+async def send_ai_reply_or_photo(message, processing_msg, reply, prompt_text=""):
+    img_url = extract_image_url(reply)
+    if img_url:
+        try:
+            caption_text = f"🎨 `{prompt_text}`" if prompt_text else "🎨 **Generated for you!**"
+            await message.reply_photo(img_url, caption=caption_text)
+            await processing_msg.delete()
+            return
+        except Exception as e:
+            print(f"Error sending reply photo: {e}")
+            
+    await processing_msg.edit_text(reply)
 
 @Client.on_message(filters.command("image"), group=1)
 async def image_command(client: Client, message: Message):
@@ -131,15 +173,15 @@ async def image_command(client: Client, message: Message):
         await message.reply_text("Please describe the image you want me to draw below:", reply_markup=ForceReply(selective=True))
         return
         
-    prompt = message.text.split(None, 1)[1]
-    prompt_formatted = prompt.replace(" ", "_")
-    image_url = f"https://image.pollinations.ai/prompt/{prompt_formatted},_photorealistic,_highly_detailed,_4k_resolution,_cinematic_lighting?width=1024&height=1024&nologo=true"
+    raw_prompt = message.text.split(None, 1)[1]
+    image_url = clean_and_generate_image_url(raw_prompt)
     
-    processing_msg = await message.reply_text("🎨 Drawing image...")
+    processing_msg = await message.reply_text("🎨 Drawing image with FLUX AI...")
     try:
-        await message.reply_photo(image_url, caption=prompt)
+        await message.reply_photo(image_url, caption=f"🎨 `{raw_prompt}`")
         await processing_msg.delete()
-    except:
+    except Exception as e:
+        print(f"Error in image_command: {e}")
         await processing_msg.edit_text("Sorry, failed to generate or fetch the image.")
 
 @Client.on_message(filters.command("timezone"), group=1)
@@ -269,11 +311,19 @@ async def private_ai_chat(client: Client, message: Message):
                     await processing_msg.edit_text("❌ Failed to read file content for Udom.")
                     return
 
+    # Direct image generation detection in plain chat
+    lower_text = text.lower().strip()
+    image_trigger_keywords = ["draw ", "generat image", "generate image", "create image", "make image", "generate photo", "create photo", "make photo", "draw a ", "draw me "]
+    if any(lower_text.startswith(kw) for kw in image_trigger_keywords):
+        processing_msg = await message.reply_text("🎨 Drawing image with FLUX AI...", reply_to_message_id=message.id)
+        img_url = clean_and_generate_image_url(text)
+        try:
+            await message.reply_photo(img_url, caption=f"🎨 `{text}`")
+            await processing_msg.delete()
+            return
+        except Exception as e:
+            print(f"Error in direct drawing request: {e}")
+
     processing_msg = await message.reply_text("🤔 Thinking...", reply_to_message_id=message.id)
     reply = await get_ai_response(message.chat.id, prompt)
-    
-    if "image.pollinations.ai" in reply:
-        await message.reply_photo(reply.strip())
-        await processing_msg.delete()
-    else:
-        await processing_msg.edit_text(reply)
+    await send_ai_reply_or_photo(message, processing_msg, reply, prompt_text=text)
