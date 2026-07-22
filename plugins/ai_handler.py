@@ -93,46 +93,71 @@ If the user asks for a video, you must reply: "Sorry, I cannot generate videos b
 
 async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):
     current_time_str = get_user_current_time(chat_id)
-    
+
+    # ── Inject brain learned context ───────────────────────────────────────
+    try:
+        from plugins.brain import bot_brain
+        brain_context = bot_brain.build_context_for_query(user_prompt)
+    except Exception:
+        brain_context = ""
+
     # Initialize history for chat if not exists
     if chat_id not in chat_history:
         chat_history[chat_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
-    
-    # Add user message to history with local time context
+
+    # Add user message to history with local time context + brain knowledge
     time_prefix = f"[Current User Local Time: {current_time_str}]"
     final_prompt = f"{time_prefix}\n{user_prompt}"
+
+    if brain_context:
+        final_prompt = f"{time_prefix}\n{brain_context}\n\nUser Prompt:\n{user_prompt}"
     if context:
-        final_prompt = f"{time_prefix}\nContext information:\n{context}\n\nUser Prompt:\n{user_prompt}"
-        
+        brain_prefix = ("Learned Knowledge:\n" + brain_context + "\n") if brain_context else ""
+        final_prompt = (
+            f"{time_prefix}\n"
+            f"{brain_prefix}"
+            f"Context information:\n{context}\n\nUser Prompt:\n{user_prompt}"
+        )
+
     if image_url:
         message_content = f"{final_prompt}\n\nImage URL: {image_url}"
         chat_history[chat_id].append({"role": "user", "content": message_content})
     else:
         chat_history[chat_id].append({"role": "user", "content": final_prompt})
-    
-    # Keep only the last 10 messages to avoid huge context limits
-    if len(chat_history[chat_id]) > 11:
-        chat_history[chat_id] = [chat_history[chat_id][0]] + chat_history[chat_id][-10:]
-        
+
+    # Keep last 12 messages (system + 11 turns)
+    if len(chat_history[chat_id]) > 13:
+        chat_history[chat_id] = [chat_history[chat_id][0]] + chat_history[chat_id][-12:]
+
+    reply = None
     try:
         import requests
         def fetch_pollinations():
-            headers = {'Content-Type': 'application/json'}
-            data = {'messages': chat_history[chat_id], 'model': 'openai'}
-            response = requests.post('https://text.pollinations.ai/', headers=headers, json=data, timeout=30)
+            headers = {"Content-Type": "application/json"}
+            data = {"messages": chat_history[chat_id], "model": "openai"}
+            response = requests.post("https://text.pollinations.ai/", headers=headers, json=data, timeout=30)
             response.raise_for_status()
             return response.text
-            
+
         reply = await asyncio.to_thread(fetch_pollinations)
-        
-        # Intercept DALL-E limit hallucinations from the underlying OpenAI model
-        if "limit for generating" in reply.lower() or "limit for creating" in reply.lower() or "sign in" in reply.lower():
-            safe_prompt = user_prompt.replace(" ", "_")
-            reply = f"https://image.pollinations.ai/prompt/{safe_prompt},_photorealistic?width=1920&height=1080&nologo=true"
-        
-        # Add AI reply to history
+
+        # Fix DALL-E hallucination — use proper FLUX URL
+        if reply and ("limit for generating" in reply.lower() or "limit for creating" in reply.lower() or "sign in" in reply.lower()):
+            import urllib.parse
+            safe_prompt = urllib.parse.quote(f"{user_prompt}, ultra-realistic, professional photography, 8K")
+            reply = f"https://image.pollinations.ai/prompt/{safe_prompt}?model=flux&width=1920&height=1080&nologo=true&enhance=true"
+
         chat_history[chat_id].append({"role": "assistant", "content": reply})
+
+        # ── Record interaction in brain memory ──────────────────────────────
+        try:
+            from plugins.brain import bot_brain as _brain
+            _brain.record_interaction(user_prompt, reply)
+        except Exception:
+            pass
+
         return reply
+
     except Exception as e:
         print(f"Pollinations Error: {e}")
         # Fallback to g4f
@@ -144,6 +169,13 @@ async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):
             )
             reply = response.choices[0].message.content
             chat_history[chat_id].append({"role": "assistant", "content": reply})
+
+            try:
+                from plugins.brain import bot_brain as _brain
+                _brain.record_interaction(user_prompt, reply)
+            except Exception:
+                pass
+
             return reply
         except Exception as e2:
             print(f"AI Error with gpt-4o: {e2}")
@@ -154,11 +186,20 @@ async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):
                 )
                 reply = response.choices[0].message.content
                 chat_history[chat_id].append({"role": "assistant", "content": reply})
+
+                try:
+                    from plugins.brain import bot_brain as _brain
+                    _brain.record_interaction(user_prompt, reply)
+                except Exception:
+                    pass
+
                 return reply
             except Exception as e3:
                 print(f"AI Error with gpt-3.5-turbo: {e3}")
-                chat_history[chat_id].pop()
+                if chat_history[chat_id][-1]["role"] == "user":
+                    chat_history[chat_id].pop()
                 return f"Sorry, I am having trouble thinking right now. Error: {str(e3)}"
+
 
 class LiveTimer:
     def __init__(self, message, base_text="Processing..."):

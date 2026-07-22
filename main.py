@@ -56,7 +56,24 @@ def main():
     )
     
     app.start()
-    
+
+    # ── Start self-learning brain background loop ──────────────────────────
+    async def start_brain_loop():
+        try:
+            from plugins.brain import auto_training_loop, bot_brain
+            # Do one quick initial research session on first run (if no facts yet)
+            stats = bot_brain.stats()
+            if stats["total_facts"] == 0:
+                logger.info("[Brain] First run — starting initial research session...")
+                await bot_brain.auto_research(limit=3)
+                logger.info(f"[Brain] Initial research complete. {bot_brain.stats()['total_facts']} facts stored.")
+            # Start background 6-hour loop
+            app.loop.create_task(auto_training_loop())
+            logger.info("[Brain] Auto-training loop started (every 6 hours).")
+        except Exception as e:
+            logger.error(f"[Brain] Failed to start training loop: {e}")
+
+    app.loop.run_until_complete(start_brain_loop())
     async def set_commands():
         from pyrogram.types import BotCommand
         try:
@@ -64,10 +81,13 @@ def main():
                 BotCommand("start", "Start the bot"),
                 BotCommand("download", "Download media from a link"),
                 BotCommand("convert", "Convert a media file"),
-                BotCommand("image", "Generate an image with AI"),
+                BotCommand("image", "Generate a professional AI image"),
                 BotCommand("ask", "Ask the AI a question"),
-                BotCommand("search", "Search the web"),
-                BotCommand("help", "Show help info")
+                BotCommand("search", "Search the web with AI"),
+                BotCommand("train", "Trigger AI self-training research session"),
+                BotCommand("brainstats", "View brain knowledge base stats"),
+                BotCommand("timezone", "Set your local timezone"),
+                BotCommand("help", "Show all features & help info")
             ])
             import requests
             desc = "👋 Welcome to Telegram AI Bot (Udom)!\n\n⚠️ Note: Please wait a minute and ask again if Bot does not reply to you."
