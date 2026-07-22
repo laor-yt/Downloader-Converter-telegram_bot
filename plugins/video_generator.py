@@ -111,13 +111,13 @@ def _validate_and_enhance_video(raw_path: str, temp_dir: str, width=1280, height
     return raw_path
 
 async def _fallback_slideshow(prompt: str, temp_dir: str, progress_callback=None) -> str | None:
-    if progress_callback: progress_callback("🎬 Generating cinematic scenes...")
+    if progress_callback: progress_callback("🎬 Generating High-Quality 1080p Cinematic Scenes...")
     images = []
-    for i in range(2):
+    for i in range(3):
         try:
-            p = f"{prompt}, cinematic scene {i+1}, ultra-realistic, 8k, photorealistic"
+            p = f"{prompt}, cinematic scene {i+1}, 8k resolution, photorealistic, masterpiece, highly detailed"
             encoded = urllib.parse.quote(p)
-            url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1280&height=720&nologo=true&seed={i * 999}"
+            url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1920&height=1080&nologo=true&enhance=true&seed={i * 999}"
             resp = await asyncio.to_thread(requests.get, url, headers={"User-Agent": "Mozilla/5.0"}, timeout=60)
             if resp.status_code == 200 and len(resp.content) > 5000:
                 p_img = os.path.join(temp_dir, f"fb_scene_{i}_{uuid.uuid4().hex}.jpg")
@@ -129,7 +129,7 @@ async def _fallback_slideshow(prompt: str, temp_dir: str, progress_callback=None
             
     if not images: return None
     
-    if progress_callback: progress_callback("🎬 Animating scenes...")
+    if progress_callback: progress_callback("🎬 Compositing 1080p Full HD Video with Smooth Animation...")
     out_path = os.path.join(temp_dir, f"fb_vid_{uuid.uuid4().hex}.mp4")
     try:
         inputs = []
@@ -139,12 +139,18 @@ async def _fallback_slideshow(prompt: str, temp_dir: str, progress_callback=None
         n = len(images)
         vf = []
         for j in range(n):
-            vf.append(f"[{j}:v]scale=8000:-1,zoompan=z='min(zoom+0.0015,1.5)':d=96:s=1280x720[v{j}]")
+            vf.append(f"[{j}:v]scale=8000:-1,zoompan=z='min(zoom+0.0015,1.5)':d=96:s=1920x1080,fps=30,format=yuv420p[v{j}]")
         
         concat = "".join(f"[v{j}]" for j in range(n))
         vf.append(f"{concat}concat=n={n}:v=1:a=0[outv]")
         
-        cmd = [FFMPEG_EXE, "-y", *inputs, "-filter_complex", ";".join(vf), "-map", "[outv]", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-fpsmax", "24", out_path]
+        cmd = [
+            FFMPEG_EXE, "-y", *inputs, 
+            "-filter_complex", ";".join(vf), 
+            "-map", "[outv]", 
+            "-c:v", "libx264", "-preset", "fast", "-crf", "20", 
+            "-pix_fmt", "yuv420p", "-threads", "8", out_path
+        ]
         subprocess.run(cmd, capture_output=True, check=True, timeout=120)
         
         if os.path.exists(out_path):
