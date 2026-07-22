@@ -683,14 +683,15 @@ async def private_ai_chat(client: Client, message: Message):
             
             cached_obj = url_cache.get(short_id)
             if cached_obj:
-                processing_msg = await message.reply_text(f"✂️ Cutting video into {num_clips} clips...", reply_to_message_id=message.id)
+                processing_msg = await message.reply_text(f"⏱ [00:00] ✂️ Cutting video into {num_clips} clips...", reply_to_message_id=message.id)
                 try:
-                    if isinstance(cached_obj, str):
-                        from downloader import download_media
-                        dl_res = await asyncio.to_thread(download_media, cached_obj, 'video', None)
-                        file_path = dl_res[0] if isinstance(dl_res, tuple) else dl_res
-                    else:
-                        file_path = await client.download_media(cached_obj)
+                    async with RealtimeTimer(processing_msg, f"✂️ Cutting video into {num_clips} clips"):
+                        if isinstance(cached_obj, str):
+                            from downloader import download_media
+                            dl_res = await asyncio.to_thread(download_media, cached_obj, 'video', None)
+                            file_path = dl_res[0] if isinstance(dl_res, tuple) else dl_res
+                        else:
+                            file_path = await client.download_media(cached_obj)
                         
                     if file_path and os.path.exists(file_path):
                         from converter import clip_video_into_parts
@@ -731,26 +732,27 @@ async def private_ai_chat(client: Client, message: Message):
             from plugins.handlers import url_cache, parse_document, transcribe_audio_video, cleanup_file
             original_msg = url_cache.get(short_id)
             if original_msg:
-                processing_msg = await message.reply_text("🤔 Udom is analyzing your file...", reply_to_message_id=message.id)
+                processing_msg = await message.reply_text("⏱ [00:00] 🤔 Udom is analyzing your file...", reply_to_message_id=message.id)
                 try:
-                    file_path = await client.download_media(original_msg)
-                    
-                    mime_type = "image/jpeg"
-                    if original_msg.photo:
-                        mime_type = "image/jpeg"
-                    elif original_msg.video:
-                        mime_type = original_msg.video.mime_type or "video/mp4"
-                    elif original_msg.audio or original_msg.voice:
-                        mime_type = getattr(original_msg.audio or original_msg.voice, 'mime_type', "audio/mp3")
-                    elif original_msg.document:
-                        mime_type = original_msg.document.mime_type or "application/pdf"
+                    async with RealtimeTimer(processing_msg, "🤔 Udom is analyzing your file"):
+                        file_path = await client.download_media(original_msg)
                         
-                    # 1. Try Gemini Vision first (for true visual image/video analysis)
-                    gemini_reply = await asyncio.to_thread(analyze_media_with_gemini, file_path, text, mime_type)
-                    if gemini_reply:
-                        cleanup_file(file_path)
-                        await send_ai_reply_or_photo(message, processing_msg, gemini_reply, prompt_text=text)
-                        return
+                        mime_type = "image/jpeg"
+                        if original_msg.photo:
+                            mime_type = "image/jpeg"
+                        elif original_msg.video:
+                            mime_type = original_msg.video.mime_type or "video/mp4"
+                        elif original_msg.audio or original_msg.voice:
+                            mime_type = getattr(original_msg.audio or original_msg.voice, 'mime_type', "audio/mp3")
+                        elif original_msg.document:
+                            mime_type = original_msg.document.mime_type or "application/pdf"
+                            
+                        # 1. Try Gemini Vision first (for true visual image/video analysis)
+                        gemini_reply = await asyncio.to_thread(analyze_media_with_gemini, file_path, text, mime_type)
+                        if gemini_reply:
+                            cleanup_file(file_path)
+                            await send_ai_reply_or_photo(message, processing_msg, gemini_reply, prompt_text=text)
+                            return
 
                     # 2. Fallback to OCR / Speech / Document parsing
                     file_content = ""
