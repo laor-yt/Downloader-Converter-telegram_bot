@@ -6,6 +6,15 @@ import imageio_ffmpeg
 from urllib.parse import urlparse
 from utils import get_temp_dir
 
+def clean_youtube_url(url):
+    """Strips playlist and radio parameters from YouTube URLs for clean single video extraction."""
+    import re
+    if 'youtube.com' in url or 'youtu.be' in url:
+        m = re.search(r'(?:v=|\/|be\/)([a-zA-Z0-9_-]{11})', url)
+        if m:
+            return f"https://www.youtube.com/watch?v={m.group(1)}"
+    return url
+
 def download_media(url, is_audio=False, progress_callback=None):
     """
     Downloads media from a URL using yt-dlp.
@@ -14,6 +23,7 @@ def download_media(url, is_audio=False, progress_callback=None):
     """
     temp_dir = get_temp_dir()
     file_id = str(uuid.uuid4())
+    url = clean_youtube_url(url)
     
     def yt_dlp_hook(d):
         if d['status'] == 'downloading' and progress_callback:
@@ -28,6 +38,7 @@ def download_media(url, is_audio=False, progress_callback=None):
         'outtmpl': os.path.join(temp_dir, f'{file_id}.%(ext)s'),
         'quiet': True,
         'no_warnings': True,
+        'noplaylist': True,
         'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
         'progress_hooks': [yt_dlp_hook] if progress_callback else [],
         'js_runtimes': {'nodejs': {}, 'node': {}},
@@ -39,7 +50,7 @@ def download_media(url, is_audio=False, progress_callback=None):
         },
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios', 'android', 'mweb', 'tv', 'web_creator']
+                'player_client': ['ios', 'android', 'tv']
             }
         },
     }
@@ -59,8 +70,7 @@ def download_media(url, is_audio=False, progress_callback=None):
     else:
         print(f"⚠️ No cookies file found at {cookies_path}. YouTube might block downloads.")
     
-    # Telegram bot file size limit is 50MB on public API, but up to 2GB on Local API Server
-    MAX_SIZE_BYTES = 1950 * 1024 * 1024  # 1950MB to be safe
+    MAX_SIZE_BYTES = 1950 * 1024 * 1024  # 1950MB safety limit
 
     if is_audio:
         ydl_opts.update({
@@ -77,61 +87,58 @@ def download_media(url, is_audio=False, progress_callback=None):
             'merge_output_format': 'mp4',
         })
 
+    # Execute yt-dlp with format fallbacks
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # First extract info without downloading to see if it's too large
-            info = ydl.extract_info(url, download=False)
-            
-            # Check filesize if available
-            filesize = info.get('filesize') or info.get('filesize_approx')
-            if filesize and filesize > MAX_SIZE_BYTES:
-                print(f"File too large: {filesize / 1024 / 1024 / 1024:.2f}GB")
-                return 'TOO_LARGE'
-                
-            info_dict = ydl.extract_info(url, download=True)
-            downloaded_file = None
-            for f in os.listdir(temp_dir):
-                if f.startswith(file_id) and not f.endswith('.part') and not f.endswith('.ytdl'):
-                    downloaded_file = os.path.join(temp_dir, f)
-                    break
-            
-            # Check file size before returning
-            if downloaded_file and os.path.exists(downloaded_file):
-                file_size = os.path.getsize(downloaded_file)
-                if file_size > MAX_SIZE_BYTES:
-                    os.remove(downloaded_file)
-                    print(f"File too large: {file_size / 1024 / 1024 / 1024:.2f}GB, limit is 1.95GB")
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                filesize = info.get('filesize') or info.get('filesize_approx')
+                if filesize and filesize > MAX_SIZE_BYTES:
                     return 'TOO_LARGE'
-            
+                ydl.extract_info(url, download=True)
+        except Exception as format_e:
+            print(f"Initial yt-dlp format attempt failed: {format_e}. Retrying with format=best...")
+            ydl_opts['format'] = 'best'
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.extract_info(url, download=True)
+                
+        downloaded_file = None
+        for f in os.listdir(temp_dir):
+            if f.startswith(file_id) and not f.endswith('.part') and not f.endswith('.ytdl'):
+                downloaded_file = os.path.join(temp_dir, f)
+                break
+        
+        if downloaded_file and os.path.exists(downloaded_file):
+            file_size = os.path.getsize(downloaded_file)
+            if file_size > MAX_SIZE_BYTES:
+                os.remove(downloaded_file)
+                return 'TOO_LARGE'
             return downloaded_file
     except Exception as e:
         error_str = str(e)
         print(f"Error downloading with yt-dlp: {e}")
         
-        # Fallback to pytubefix if YouTube blocked the cloud IP
+        # Fallback to pytubefix sequential client attempts
         if 'Sign in to confirm' in error_str or 'bot' in error_str.lower() or 'Requested format is not available' in error_str or 'HTTP Error 400' in error_str or 'HTTP Error 403' in error_str:
             print("YouTube blocked yt-dlp. Attempting fallback with pytubefix...")
             try:
                 from pytubefix import YouTube
-                # Fallback sequentially through clients
                 yt = None
-                for client in ['ANDROID', 'TV', 'MWEB']:
+                for client in ['WEB', 'ANDROID', 'IOS', 'TV']:
                     try:
                         yt = YouTube(url, client=client)
-                        # trigger network request to see if it works
                         test_title = yt.title
                         break
                     except Exception:
                         continue
                         
                 if yt is None:
-                    yt = YouTube(url) # try default
+                    yt = YouTube(url)
                 
                 temp_dir = get_temp_dir()
                 if is_audio:
                     ys = yt.streams.get_audio_only()
                     out_file = ys.download(output_path=temp_dir)
-                    # Convert to mp3 using pydub
                     from pydub import AudioSegment
                     audio = AudioSegment.from_file(out_file)
                     base, ext = os.path.splitext(out_file)
