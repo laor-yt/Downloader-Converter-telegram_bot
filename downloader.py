@@ -23,7 +23,7 @@ def download_media(url, is_audio=False, progress_callback=None):
             text = f"Downloading... {percent.strip()} of {size.strip()} at {speed.strip()}"
             progress_callback(text)
     
-    # yt-dlp options
+    # yt-dlp options with user device spoofing and player client rotation
     ydl_opts = {
         'outtmpl': os.path.join(temp_dir, f'{file_id}.%(ext)s'),
         'quiet': True,
@@ -31,7 +31,17 @@ def download_media(url, is_audio=False, progress_callback=None):
         'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
         'progress_hooks': [yt_dlp_hook] if progress_callback else [],
         'js_runtimes': {'nodejs': {}, 'node': {}},
-        'extractor_args': {'youtube': {'player_client': ['ios', 'tv', 'android', 'web_creator']}},
+        'geo_bypass': True,
+        'geo_bypass_country': 'US',
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Telegram/10.14',
+            'Accept-Language': 'en-US,en;q=0.9,km-KH;q=0.8',
+        },
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['ios', 'android', 'mweb', 'tv', 'web_creator']
+            }
+        },
     }
     
     # Use cookies file if available (helps bypass YouTube bot detection on cloud servers)
