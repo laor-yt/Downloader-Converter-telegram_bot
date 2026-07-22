@@ -198,6 +198,45 @@ async def handle_media(client, message):
         ])
         await message.reply_text(f"📁 **File Received:** `{file_name}`\nWhat would you like to do?", reply_markup=keyboard)
 
+class RealtimeTimer:
+    def __init__(self, message, initial_text="Processing..."):
+        self.message = message
+        self.current_text = initial_text
+        self.start_time = time.time()
+        self.stop_event = asyncio.Event()
+        self.task = None
+
+    def update_text(self, text):
+        self.current_text = text
+
+    async def _timer_loop(self):
+        last_sent = ""
+        while not self.stop_event.is_set():
+            elapsed = int(time.time() - self.start_time)
+            mins, secs = divmod(elapsed, 60)
+            formatted = f"⏱ [{mins:02d}:{secs:02d}] {self.current_text}"
+            if formatted != last_sent:
+                last_sent = formatted
+                try:
+                    await self.message.edit_text(formatted)
+                except MessageNotModified:
+                    pass
+                except Exception as e:
+                    pass
+            try:
+                await asyncio.sleep(1.0)
+            except (asyncio.CancelledError, Exception):
+                break
+
+    async def __aenter__(self):
+        self.task = asyncio.create_task(self._timer_loop())
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        self.stop_event.set()
+        if self.task:
+            self.task.cancel()
+
 message_start_times = {}
 
 async def safe_edit_text(message, text, reply_markup=None):
@@ -593,60 +632,45 @@ async def button_callback(client, callback_query):
             return
             
         is_audio = (action == "dl_aud")
-        await safe_edit_text(query_msg, "Downloading... Please wait.")
         
-        last_update_time = time.time()
-        last_text = ""
-        loop = asyncio.get_running_loop()
-        
-        def progress_callback(text):
-            nonlocal last_update_time, last_text
-            current_time = time.time()
-            if current_time - last_update_time > 2.0 and text != last_text:
-                last_update_time = current_time
-                last_text = text
-                asyncio.run_coroutine_threadsafe(safe_edit_text(query_msg, text), loop)
-
-        try:
-            filepath = await asyncio.to_thread(download_media, url, is_audio, progress_callback)
-        except Exception as e:
-            print(f"Download error: {e}")
-            filepath = None
-        
-        if filepath == 'TOO_LARGE':
-            await safe_edit_text(query_msg, "❌ File is too large to send via Telegram (limit is 1.95GB).")
-        elif filepath == 'BOT_DETECTED':
-            await safe_edit_text(query_msg, "❌ YouTube is blocking downloads from this server. This is a known issue with cloud hosting. Try running the bot locally for YouTube downloads.")
-        elif isinstance(filepath, str) and filepath.startswith('ERROR:'):
-            await safe_edit_text(query_msg, f"❌ {filepath}")
-        elif filepath and os.path.exists(filepath):
-            await safe_edit_text(query_msg, "Download complete! Uploading...")
+        async with RealtimeTimer(query_msg, "Downloading... Please wait.") as timer:
+            loop = asyncio.get_running_loop()
             
+            def progress_callback(text):
+                timer.update_text(text)
+
             try:
-                # Use Pyrogram's built-in progress for uploading
-                def pyrogram_upload_progress(current, total):
-                    nonlocal last_update_time, last_text
-                    current_time = time.time()
-                    if current_time - last_update_time > 2.0:
-                        last_update_time = current_time
-                        percent = current * 100 / total
-                        text = f"Uploading... {percent:.1f}% ({current/1024/1024:.1f}MB / {total/1024/1024:.1f}MB)"
-                        if text != last_text:
-                            last_text = text
-                            asyncio.run_coroutine_threadsafe(safe_edit_text(query_msg, text), loop)
-                
-                if is_audio:
-                    await client.send_audio(chat_id=query_msg.chat.id, audio=filepath, progress=pyrogram_upload_progress)
-                else:
-                    await client.send_video(chat_id=query_msg.chat.id, video=filepath, supports_streaming=True, progress=pyrogram_upload_progress)
-                
-                await safe_edit_text(query_msg, "Done! ✅")
+                filepath = await asyncio.to_thread(download_media, url, is_audio, progress_callback)
             except Exception as e:
-                error_str = str(e)
-                print(f"Upload failed: {error_str}")
-                await safe_edit_text(query_msg, f"❌ Upload failed: {error_str}")
-            finally:
-                cleanup_file(filepath)
+                print(f"Download error: {e}")
+                filepath = None
+            
+            if filepath == 'TOO_LARGE':
+                await safe_edit_text(query_msg, "❌ File is too large to send via Telegram (limit is 1.95GB).")
+            elif filepath == 'BOT_DETECTED':
+                await safe_edit_text(query_msg, "❌ YouTube is blocking downloads from this server. Try running locally.")
+            elif isinstance(filepath, str) and filepath.startswith('ERROR:'):
+                await safe_edit_text(query_msg, f"❌ {filepath}")
+            elif filepath and os.path.exists(filepath):
+                timer.update_text("Download complete! Uploading...")
+                
+                try:
+                    def pyrogram_upload_progress(current, total):
+                        percent = current * 100 / total
+                        timer.update_text(f"Uploading... {percent:.1f}% ({current/1024/1024:.1f}MB / {total/1024/1024:.1f}MB)")
+                    
+                    if is_audio:
+                        await client.send_audio(chat_id=query_msg.chat.id, audio=filepath, progress=pyrogram_upload_progress)
+                    else:
+                        await client.send_video(chat_id=query_msg.chat.id, video=filepath, supports_streaming=True, progress=pyrogram_upload_progress)
+                    
+                    await safe_edit_text(query_msg, "Done! ✅")
+                except Exception as e:
+                    error_str = str(e)
+                    print(f"Upload failed: {error_str}")
+                    await safe_edit_text(query_msg, f"❌ Upload failed: {error_str}")
+                finally:
+                    cleanup_file(filepath)
     elif data.startswith("url_dub_lang|"):
         parts = data.split("|")
         short_id = parts[1]
@@ -656,55 +680,38 @@ async def button_callback(client, callback_query):
             await safe_edit_text(query_msg, "Link expired or invalid. Please send it again.")
             return
 
-        await safe_edit_text(query_msg, f"📥 Downloading video from link... `{url}`")
-        
-        last_update_time = time.time()
-        last_text = ""
-        loop = asyncio.get_running_loop()
-        
-        def progress_cb(text):
-            nonlocal last_update_time, last_text
-            current_time = time.time()
-            if current_time - last_update_time > 2.0 and text != last_text:
-                last_update_time = current_time
-                last_text = text
-                asyncio.run_coroutine_threadsafe(safe_edit_text(query_msg, text), loop)
+        async with RealtimeTimer(query_msg, f"📥 Downloading video from link... `{url}`") as timer:
+            def progress_cb(text):
+                timer.update_text(text)
 
-        try:
-            dl_res = await asyncio.to_thread(download_media, url, False, progress_cb)
-            input_path = dl_res[0] if isinstance(dl_res, tuple) else dl_res
-            
-            if input_path and os.path.exists(input_path):
-                from converter import translate_and_dub_media
-                output_path = await asyncio.to_thread(translate_and_dub_media, input_path, target_lang, True, progress_cb)
+            try:
+                dl_res = await asyncio.to_thread(download_media, url, False, progress_cb)
+                input_path = dl_res[0] if isinstance(dl_res, tuple) else dl_res
                 
-                if output_path and isinstance(output_path, str) and not output_path.startswith("ERROR:") and os.path.exists(output_path):
-                    await safe_edit_text(query_msg, "Dubbing complete! Uploading translated video...")
+                if input_path and os.path.exists(input_path):
+                    from converter import translate_and_dub_media
+                    output_path = await asyncio.to_thread(translate_and_dub_media, input_path, target_lang, True, progress_cb)
                     
-                    def pyrogram_upload_progress(current, total):
-                        nonlocal last_update_time, last_text
-                        current_time = time.time()
-                        if current_time - last_update_time > 2.0:
-                            last_update_time = current_time
+                    if output_path and isinstance(output_path, str) and not output_path.startswith("ERROR:") and os.path.exists(output_path):
+                        timer.update_text("Dubbing complete! Uploading translated video...")
+                        
+                        def pyrogram_upload_progress(current, total):
                             percent = current * 100 / total
-                            text = f"Uploading... {percent:.1f}% ({current/1024/1024:.1f}MB / {total/1024/1024:.1f}MB)"
-                            if text != last_text:
-                                last_text = text
-                                asyncio.run_coroutine_threadsafe(safe_edit_text(query_msg, text), loop)
-                                
-                    await client.send_video(chat_id=query_msg.chat.id, video=output_path, supports_streaming=True, progress=pyrogram_upload_progress)
-                    cleanup_file(output_path)
-                    await safe_edit_text(query_msg, "Voice dubbing from link complete! ✅")
+                            timer.update_text(f"Uploading... {percent:.1f}% ({current/1024/1024:.1f}MB / {total/1024/1024:.1f}MB)")
+                                    
+                        await client.send_video(chat_id=query_msg.chat.id, video=output_path, supports_streaming=True, progress=pyrogram_upload_progress)
+                        cleanup_file(output_path)
+                        await safe_edit_text(query_msg, "Voice dubbing from link complete! ✅")
+                    else:
+                        err_msg = output_path if isinstance(output_path, str) else "Failed to dub media."
+                        await safe_edit_text(query_msg, f"❌ {err_msg}")
+                        
+                    cleanup_file(input_path)
                 else:
-                    err_msg = output_path if isinstance(output_path, str) else "Failed to dub media."
-                    await safe_edit_text(query_msg, f"❌ {err_msg}")
-                    
-                cleanup_file(input_path)
-            else:
-                await safe_edit_text(query_msg, "❌ Failed to download video from link for dubbing.")
-        except Exception as e:
-            print(f"URL Dubbing error: {e}")
-            await safe_edit_text(query_msg, f"❌ Dubbing failed: {e}")
+                    await safe_edit_text(query_msg, "❌ Failed to download video from link for dubbing.")
+            except Exception as e:
+                print(f"URL Dubbing error: {e}")
+                await safe_edit_text(query_msg, f"❌ Dubbing failed: {e}")
 
     elif data.startswith("recap_url|"):
         parts = data.split("|")
@@ -715,37 +722,28 @@ async def button_callback(client, callback_query):
             await safe_edit_text(query_msg, "Link expired or invalid. Please send it again.")
             return
 
-        await safe_edit_text(query_msg, f"🧠 Analyzing video content & generating Voiceover Recap... `{url}`")
-        last_update_time = time.time()
-        last_text = ""
-        loop = asyncio.get_running_loop()
-        
-        def progress_cb(text):
-            nonlocal last_update_time, last_text
-            current_time = time.time()
-            if current_time - last_update_time > 2.0 and text != last_text:
-                last_update_time = current_time
-                last_text = text
-                asyncio.run_coroutine_threadsafe(safe_edit_text(query_msg, text), loop)
+        async with RealtimeTimer(query_msg, f"🧠 Analyzing video content & generating Voiceover Recap... `{url}`") as timer:
+            def progress_cb(text):
+                timer.update_text(text)
 
-        try:
-            dl_res = await asyncio.to_thread(download_media, url, False, progress_cb)
-            input_path = dl_res[0] if isinstance(dl_res, tuple) else dl_res
-            
-            if input_path and os.path.exists(input_path):
-                from converter import recap_video_audio
-                recap_text, media_out = await asyncio.to_thread(recap_video_audio, input_path, lang, True, True, progress_cb)
+            try:
+                dl_res = await asyncio.to_thread(download_media, url, False, progress_cb)
+                input_path = dl_res[0] if isinstance(dl_res, tuple) else dl_res
                 
-                await safe_edit_text(query_msg, recap_text)
-                if media_out and os.path.exists(media_out):
-                    await client.send_video(chat_id=query_msg.chat.id, video=media_out, caption=f"🎙 **Voiceover Recap Video ({lang.upper()})**", supports_streaming=True)
-                    cleanup_file(media_out)
-                cleanup_file(input_path)
-            else:
-                await safe_edit_text(query_msg, "❌ Failed to download video for recap.")
-        except Exception as e:
-            print(f"URL Recap error: {e}")
-            await safe_edit_text(query_msg, f"❌ Recap failed: {e}")
+                if input_path and os.path.exists(input_path):
+                    from converter import recap_video_audio
+                    recap_text, media_out = await asyncio.to_thread(recap_video_audio, input_path, lang, True, True, progress_cb)
+                    
+                    await safe_edit_text(query_msg, recap_text)
+                    if media_out and os.path.exists(media_out):
+                        await client.send_video(chat_id=query_msg.chat.id, video=media_out, caption=f"🎙 **Voiceover Recap Video ({lang.upper()})**", supports_streaming=True)
+                        cleanup_file(media_out)
+                    cleanup_file(input_path)
+                else:
+                    await safe_edit_text(query_msg, "❌ Failed to download video for recap.")
+            except Exception as e:
+                print(f"URL Recap error: {e}")
+                await safe_edit_text(query_msg, f"❌ Recap failed: {e}")
 
     elif data.startswith("conv_") or data.startswith("dub_lang|") or data.startswith("recap_file|"):
         parts = data.split('|')
@@ -757,110 +755,85 @@ async def button_callback(client, callback_query):
             await safe_edit_text(query_msg, "Session expired. Please send the file again.")
             return
             
-        await safe_edit_text(query_msg, "Downloading file from Telegram... (This is fast now!)")
-        try:
-            last_update_time = time.time()
-            last_text = ""
-            loop = asyncio.get_running_loop()
-            
-            def pyrogram_download_progress(current, total):
-                nonlocal last_update_time, last_text
-                current_time = time.time()
-                if current_time - last_update_time > 2.0:
-                    last_update_time = current_time
+        async with RealtimeTimer(query_msg, "Downloading file from Telegram...") as timer:
+            try:
+                def pyrogram_download_progress(current, total):
                     percent = current * 100 / total
-                    text = f"Downloading... {percent:.1f}% ({current/1024/1024:.1f}MB / {total/1024/1024:.1f}MB)"
-                    if text != last_text:
-                        last_text = text
-                        asyncio.run_coroutine_threadsafe(safe_edit_text(query_msg, text), loop)
-            
-            input_path = await cached_msg.download(progress=pyrogram_download_progress)
-            
-            await safe_edit_text(query_msg, "Converting... Please wait.")
-            output_path = None
-            
-            def progress_callback(text):
-                nonlocal last_update_time, last_text
-                current_time = time.time()
-                if current_time - last_update_time > 2.0 and text != last_text:
-                    last_update_time = current_time
-                    last_text = text
-                    asyncio.run_coroutine_threadsafe(safe_edit_text(query_msg, text), loop)
-                        
-            if action == "conv_aud":
-                output_path = await asyncio.to_thread(convert_video_to_audio, input_path, 'mp3', progress_callback)
-                send_method = client.send_audio
-                send_kwargs = {'audio': output_path} if output_path else {}
-            elif action == "conv_vid":
-                target_format = parts[2]
-                output_path = await asyncio.to_thread(convert_video_format, input_path, target_format, progress_callback)
-                if target_format in ['mp4', 'mkv', 'avi']:
-                    send_method = client.send_video
-                    send_kwargs = {'video': output_path, 'supports_streaming': True} if output_path else {}
-                else:
+                    timer.update_text(f"Downloading... {percent:.1f}% ({current/1024/1024:.1f}MB / {total/1024/1024:.1f}MB)")
+                
+                input_path = await cached_msg.download(progress=pyrogram_download_progress)
+                timer.update_text("Converting... Please wait.")
+                output_path = None
+                
+                def progress_callback(text):
+                    timer.update_text(text)
+                            
+                if action == "conv_aud":
+                    output_path = await asyncio.to_thread(convert_video_to_audio, input_path, 'mp3', progress_callback)
+                    send_method = client.send_audio
+                    send_kwargs = {'audio': output_path} if output_path else {}
+                elif action == "conv_vid":
+                    target_format = parts[2]
+                    output_path = await asyncio.to_thread(convert_video_format, input_path, target_format, progress_callback)
+                    if target_format in ['mp4', 'mkv', 'avi']:
+                        send_method = client.send_video
+                        send_kwargs = {'video': output_path, 'supports_streaming': True} if output_path else {}
+                    else:
+                        send_method = client.send_document
+                        send_kwargs = {'document': output_path} if output_path else {}
+                elif action == "conv_img":
+                    target_format = parts[2]
+                    output_path = await asyncio.to_thread(convert_image_format, input_path, target_format)
+                    send_method = client.send_photo
+                    send_kwargs = {'photo': output_path} if output_path else {}
+                elif action == "conv_doc":
+                    target_format = parts[2]
+                    from converter import convert_document_format
+                    output_path = await asyncio.to_thread(convert_document_format, input_path, target_format)
                     send_method = client.send_document
                     send_kwargs = {'document': output_path} if output_path else {}
-            elif action == "conv_img":
-                target_format = parts[2]
-                output_path = await asyncio.to_thread(convert_image_format, input_path, target_format)
-                send_method = client.send_photo
-                send_kwargs = {'photo': output_path} if output_path else {}
-            elif action == "conv_doc":
-                target_format = parts[2]
-                from converter import convert_document_format
-                output_path = await asyncio.to_thread(convert_document_format, input_path, target_format)
-                send_method = client.send_document
-                send_kwargs = {'document': output_path} if output_path else {}
-            elif action == "dub_lang":
-                target_lang = parts[2]
-                is_video = bool(cached_msg.video or (cached_msg.document and str(cached_msg.document.mime_type or "").startswith("video/")))
-                from converter import translate_and_dub_media
-                output_path = await asyncio.to_thread(translate_and_dub_media, input_path, target_lang, is_video, progress_callback)
-                if is_video:
-                    send_method = client.send_video
-                    send_kwargs = {'video': output_path, 'supports_streaming': True} if output_path and not str(output_path).startswith("ERROR:") else {}
-                else:
-                    send_method = client.send_audio
-                    send_kwargs = {'audio': output_path} if output_path and not str(output_path).startswith("ERROR:") else {}
-            elif action == "recap_file":
-                lang = parts[2]
-                is_video = bool(cached_msg.video or (cached_msg.document and str(cached_msg.document.mime_type or "").startswith("video/")))
-                from converter import recap_video_audio
-                recap_text, media_out = await asyncio.to_thread(recap_video_audio, input_path, lang, is_video, True, progress_callback)
-                
-                await safe_edit_text(query_msg, recap_text)
-                if media_out and os.path.exists(media_out):
+                elif action == "dub_lang":
+                    target_lang = parts[2]
+                    is_video = bool(cached_msg.video or (cached_msg.document and str(cached_msg.document.mime_type or "").startswith("video/")))
+                    from converter import translate_and_dub_media
+                    output_path = await asyncio.to_thread(translate_and_dub_media, input_path, target_lang, is_video, progress_callback)
                     if is_video:
-                        await client.send_video(chat_id=query_msg.chat.id, video=media_out, caption=f"🎙 **Voiceover Recap Video ({lang.upper()})**", supports_streaming=True)
+                        send_method = client.send_video
+                        send_kwargs = {'video': output_path, 'supports_streaming': True} if output_path and not str(output_path).startswith("ERROR:") else {}
                     else:
-                        await client.send_audio(chat_id=query_msg.chat.id, audio=media_out, caption=f"🎙 **Voiceover Recap Audio ({lang.upper()})**")
-                    cleanup_file(media_out)
-                cleanup_file(input_path)
-                return
-                
-            if output_path and os.path.exists(output_path):
-                await safe_edit_text(query_msg, "Conversion complete! Uploading...")
-                
-                def pyrogram_upload_progress(current, total):
-                    nonlocal last_update_time, last_text
-                    current_time = time.time()
-                    if current_time - last_update_time > 2.0:
-                        last_update_time = current_time
+                        send_method = client.send_audio
+                        send_kwargs = {'audio': output_path} if output_path and not str(output_path).startswith("ERROR:") else {}
+                elif action == "recap_file":
+                    lang = parts[2]
+                    is_video = bool(cached_msg.video or (cached_msg.document and str(cached_msg.document.mime_type or "").startswith("video/")))
+                    from converter import recap_video_audio
+                    recap_text, media_out = await asyncio.to_thread(recap_video_audio, input_path, lang, is_video, True, progress_callback)
+                    
+                    await safe_edit_text(query_msg, recap_text)
+                    if media_out and os.path.exists(media_out):
+                        if is_video:
+                            await client.send_video(chat_id=query_msg.chat.id, video=media_out, caption=f"🎙 **Voiceover Recap Video ({lang.upper()})**", supports_streaming=True)
+                        else:
+                            await client.send_audio(chat_id=query_msg.chat.id, audio=media_out, caption=f"🎙 **Voiceover Recap Audio ({lang.upper()})**")
+                        cleanup_file(media_out)
+                    cleanup_file(input_path)
+                    return
+                    
+                if output_path and os.path.exists(output_path):
+                    timer.update_text("Conversion complete! Uploading...")
+                    
+                    def pyrogram_upload_progress(current, total):
                         percent = current * 100 / total
-                        text = f"Uploading... {percent:.1f}% ({current/1024/1024:.1f}MB / {total/1024/1024:.1f}MB)"
-                        if text != last_text:
-                            last_text = text
-                            asyncio.run_coroutine_threadsafe(safe_edit_text(query_msg, text), loop)
-                            
-                await send_method(chat_id=query_msg.chat.id, **send_kwargs, progress=pyrogram_upload_progress)
-                cleanup_file(output_path)
-                await safe_edit_text(query_msg, "Done! ✅")
-            else:
-                await safe_edit_text(query_msg, "Failed to convert the file.")
-                
-            cleanup_file(input_path)
-            
-        except Exception as e:
-            error_str = str(e)
-            print(f"Error in callback: {error_str}")
-            await safe_edit_text(query_msg, f"❌ An error occurred: {error_str}")
+                        timer.update_text(f"Uploading... {percent:.1f}% ({current/1024/1024:.1f}MB / {total/1024/1024:.1f}MB)")
+                                
+                    await send_method(chat_id=query_msg.chat.id, **send_kwargs, progress=pyrogram_upload_progress)
+                    cleanup_file(output_path)
+                    await safe_edit_text(query_msg, "Done! ✅")
+                else:
+                    await safe_edit_text(query_msg, "Failed to convert the file.")
+                    
+                cleanup_file(input_path)
+            except Exception as e:
+                error_str = str(e)
+                print(f"Error in callback: {error_str}")
+                await safe_edit_text(query_msg, f"❌ An error occurred: {error_str}")
