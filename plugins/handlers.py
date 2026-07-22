@@ -2,6 +2,8 @@ import os
 import uuid
 import time
 import asyncio
+import re
+from datetime import datetime
 from pyrogram import Client, filters, ContinuePropagation
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, Message
 from pyrogram.errors import MessageNotModified
@@ -11,6 +13,13 @@ from utils import cleanup_file
 from plugins.ai_handler import get_ai_response
 from plugins.document_parser import parse_document, transcribe_audio_video
 import requests
+
+BOT_STARTUP_TIME = datetime.utcnow()
+
+def is_message_too_old(message):
+    if not message or not getattr(message, "date", None):
+        return False
+    return (datetime.utcnow() - message.date).total_seconds() > 120
 
 url_cache = {}
 
@@ -330,7 +339,7 @@ async def download_command(client, message):
 # Automatic URL detector: Automatically shows download buttons whenever a user pastes a link
 @Client.on_message(filters.text & filters.private & ~filters.command(["download", "convert", "start", "help", "ask", "image", "search"]), group=0)
 async def auto_url_and_menu_handler(client, message):
-    if getattr(message.from_user, "is_self", False) or getattr(message, "outgoing", False):
+    if getattr(message.from_user, "is_self", False) or getattr(message, "outgoing", False) or is_message_too_old(message):
         return
     text = message.text.strip()
     
@@ -376,7 +385,7 @@ async def convert_command(client, message):
 
 @Client.on_message(filters.photo | filters.video | filters.audio | filters.voice | filters.document)
 async def handle_media(client, message):
-    if getattr(message.from_user, "is_self", False) or getattr(message, "outgoing", False):
+    if getattr(message.from_user, "is_self", False) or getattr(message, "outgoing", False) or is_message_too_old(message):
         return
     target_msg = message
 

@@ -4,6 +4,14 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from g4f.client import AsyncClient
 from ddgs import DDGS
+from datetime import datetime, timezone, timedelta
+
+BOT_STARTUP_TIME = datetime.utcnow()
+
+def is_message_too_old(message):
+    if not message or not getattr(message, "date", None):
+        return False
+    return (datetime.utcnow() - message.date).total_seconds() > 120
 
 # Store recent conversation history per chat for context
 chat_history = {}
@@ -501,6 +509,8 @@ async def send_ai_reply_or_photo(message, processing_msg, reply, prompt_text="")
 
 @Client.on_message(filters.command("image"), group=1)
 async def image_command(client: Client, message: Message):
+    if getattr(message.from_user, "is_self", False) or getattr(message, "outgoing", False) or is_message_too_old(message):
+        return
     if len(message.command) < 2:
         from pyrogram.types import ForceReply
         await message.reply_text("Please describe the image you want me to draw below:", reply_markup=ForceReply(selective=True))
@@ -569,9 +579,9 @@ async def search_command(client: Client, message: Message):
         await processing_msg.edit_text("Sorry, an error occurred while searching the web.")
 
 # Handle mentions and replies to the bot in groups
-@Client.on_message(filters.text & filters.group & ~filters.command(["start", "help", "ask", "search", "image", "video", "download", "convert", "finance", "market"]), group=1)
+@Client.on_message(filters.text & filters.group & ~filters.command(["start", "help", "howto", "ask", "search", "video", "image", "draw", "download", "convert"]), group=1)
 async def group_ai_chat(client: Client, message: Message):
-    if getattr(message.from_user, "is_self", False) or getattr(message, "outgoing", False):
+    if getattr(message.from_user, "is_self", False) or getattr(message, "outgoing", False) or is_message_too_old(message):
         return
     bot = await client.get_me()
     
@@ -598,11 +608,11 @@ async def group_ai_chat(client: Client, message: Message):
         await send_ai_reply_or_photo(message, processing_msg, reply, prompt_text=prompt)
 
 # Handle AI chat in private messages (if it's not a URL or command)
-@Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "ask", "search", "image", "video", "download", "convert", "finance", "market"]), group=1)
+@Client.on_message(filters.text & filters.private & ~filters.command(["start", "help", "howto", "ask", "search", "video", "image", "draw", "download", "convert"]), group=1)
 async def private_ai_chat(client: Client, message: Message):
-    if getattr(message.from_user, "is_self", False) or getattr(message, "outgoing", False):
+    if getattr(message.from_user, "is_self", False) or getattr(message, "outgoing", False) or is_message_too_old(message):
         return
-    text = message.text
+    text = message.text.strip()
     # Ignore predefined menu buttons
     if text in ["📥 Download Media", "🔄 Convert Media", "ℹ️ Help"]:
         return
