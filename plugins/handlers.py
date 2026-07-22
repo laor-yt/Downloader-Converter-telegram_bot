@@ -41,7 +41,7 @@ def is_url(text):
 async def start_command(client, message):
     welcome_message = (
         "👋 Welcome to the **Telegram AI Bot (Udom)**!\n\n"
-        "🤖 Your all-in-one AI assistant: Download • Convert • Chat • Image Generator • Voice Dubbing • Recap\n\n"
+        "🤖 Your all-in-one AI assistant: Download • Convert • Chat • Image Generator • Voice Dubbing • Recap • AI Video\n\n"
         "⚠️ **Note:** Please wait a moment and retry if the bot does not reply.\n\n"
         "Choose an option below:"
     )
@@ -63,6 +63,7 @@ async def help_command(client, message):
         "🔄 `/convert` — Send a file → convert format (MP4/MP3/AVI/WebM/JPG/PNG...)\n"
         "💬 `/ask <question>` — Ask the AI anything (also works by just typing)\n"
         "🎨 `/image <prompt>` — Generate professional Full HD AI photo\n"
+        "🎬 `/video <prompt>` — Free AI Video Generator (Text/Image/Audio to Video)\n"
         "🔍 `/search <query>` — Live web search with AI summary\n"
         "🧠 `/train` — Trigger bot self-learning research session\n"
         "📊 `/brainstats` — View brain knowledge base stats\n"
@@ -83,8 +84,8 @@ async def howto_command(client, message):
         "Please choose your language:\nសូមជ្រើសរើសភាសា:"
     )
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🇰🇭 ភាសាខ្មែរ (Khmer)", callback_data="howto_km")],
-        [InlineKeyboardButton("🇬🇧 English", callback_data="howto_en")]
+        [InlineKeyboardButton("🇰🇭 ភាសាខ្មែរ (Khmer)", callback_data="howto_km"),
+         InlineKeyboardButton("🇬🇧 English", callback_data="howto_en")]
     ])
     await message.reply_text(chooser, reply_markup=keyboard)
 
@@ -98,6 +99,7 @@ async def handle_start_menu(client, query):
             "🔄 `/convert` — Send a file → convert format (MP4/MP3/AVI/WebM/JPG/PNG...)\n"
             "💬 `/ask <question>` — Ask the AI anything (also works by just typing)\n"
             "🎨 `/image <prompt>` — Generate professional Full HD AI photo\n"
+            "🎬 `/video <prompt>` — Free AI Video Generator (Text/Image/Audio to Video)\n"
             "🔍 `/search <query>` — Live web search with AI summary\n"
             "🧠 `/train` — Trigger bot self-learning research session\n"
             "📊 `/brainstats` — View brain knowledge base stats\n"
@@ -119,6 +121,7 @@ async def handle_start_menu(client, query):
             "• 🔄 Format converter (video/audio/image)\n"
             "• 💬 AI chat (Gemini + GPT powered)\n"
             "• 🎨 Professional AI image generator (FLUX)\n"
+            "• 🎬 AI Video Generator (Text/Image/Audio to Video)\n"
             "• 🎙 AI Voice Dubbing & Translation\n"
             "• 📝 AI Video/Audio Recap & Summary\n"
             "• 🧠 Self-learning brain (auto-trains every 6h)\n"
@@ -177,6 +180,11 @@ async def handle_howto_guide(client, query):
             "② ចុចប៊ូតុង **📝 AI Video Recap**\n"
             "③ ជ្រើសរើសភាសា — Bot នឹងបង្កើតសង្ខេបខ្លី 5-10 ប្រយោគ\n\n"
 
+            "🎬 **បង្កើតវីដេអូ AI (AI Video)**\n"
+            "① វាយ: /video ក្មេងប្រុសលេងបាល់ (Text → Video)\n"
+            "② ផ្ញើរូបភាព → ចុច **🎬 Make Video (Animate)**\n"
+            "③ ផ្ញើអូឌីយ៉ូ → ចុច **🎬 Make Video (Slideshow)**\n\n"
+
             "🎨 **បង្កើតរូបភាព AI**\n"
             "① វាយ: `generate image ព្រៃភ្នំ ពេលព្រឹក`\n"
             "② ឬប្រើ: `/image a beautiful Cambodian temple at sunset`\n"
@@ -228,6 +236,11 @@ async def handle_howto_guide(client, query):
             "② Tap **📝 AI Video Recap**\n"
             "③ Choose language — bot generates a short 5-10 sentence spoken summary\n\n"
 
+            "🎬 **Free AI Video Generator**\n"
+            "① Type: /video a dragon flying over a mountain (Text → Video)\n"
+            "② Send an image → Tap **🎬 Make Video (Animate)**\n"
+            "③ Send an audio → Tap **🎬 Make Video (Slideshow)**\n\n"
+
             "🎨 **Generate AI Images**\n"
             "① Type: `generate image a lion at sunset`\n"
             "② Or use: `/image beautiful Angkor Wat at golden hour`\n"
@@ -264,7 +277,7 @@ async def handle_howto_guide(client, query):
 async def handle_back_to_start(client, query):
     welcome_message = (
         "👋 Welcome to the **Telegram AI Bot (Udom)**!\n\n"
-        "🤖 Your all-in-one AI assistant: Download • Convert • Chat • Image Generator • Voice Dubbing • Recap\n\n"
+        "🤖 Your all-in-one AI assistant: Download • Convert • Chat • Image Generator • Voice Dubbing • Recap • AI Video\n\n"
         "Choose an option below:"
     )
     keyboard = InlineKeyboardMarkup([

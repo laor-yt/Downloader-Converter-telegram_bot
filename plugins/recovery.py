@@ -252,7 +252,7 @@ async def run_http_fallback_loop(token: str, wait_seconds: int):
 
     welcome_text = (
         "👋 Welcome to the **Telegram AI Bot (Udom)**!\n\n"
-        "🤖 Your all-in-one AI assistant: Download • Convert • Chat • Image Generator • Voice Dubbing • Recap\n\n"
+        "🤖 Your all-in-one AI assistant: Download • Convert • Chat • Image Generator • Voice Dubbing • Recap • AI Video\n\n"
         "Choose an option below:"
     )
 
@@ -262,6 +262,7 @@ async def run_http_fallback_loop(token: str, wait_seconds: int):
         "🔄 `/convert` — Send a file → convert format\n"
         "💬 `/ask <question>` — Ask the AI anything (or just type)\n"
         "🎨 `/image <prompt>` — Generate professional Full HD AI photo\n"
+        "🎬 `/video <prompt>` — Free AI Video Generator (Text/Image/Audio to Video)\n"
         "🔍 `/search <query>` — Live web search with AI summary\n"
         "🧠 `/train` — Trigger bot self-learning research session\n"
         "📊 `/brainstats` — View brain knowledge base stats\n"
@@ -277,6 +278,7 @@ async def run_http_fallback_loop(token: str, wait_seconds: int):
         "• 🔄 Format converter\n"
         "• 💬 AI chat (Gemini + GPT powered)\n"
         "• 🎨 Professional AI image generator (FLUX)\n"
+        "• 🎬 AI Video Generator (Text/Image/Audio to Video)\n"
         "• 🎙 AI Voice Dubbing & Translation\n"
         "• 📝 AI Video/Audio Recap & Summary\n"
         "• 🧠 Self-learning brain (auto-trains every 6h)\n\n"
