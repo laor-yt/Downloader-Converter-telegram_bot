@@ -55,10 +55,15 @@ def download_media(url, is_audio=False, progress_callback=None):
         },
     }
     
-    # Use cookies from Environment Variable or secret file
+    # Use cookies from project root cookies.txt, Environment Variable, or secret file
     env_cookies = os.environ.get("YOUTUBE_COOKIES")
-    cookies_path = '/etc/secrets/cookies.txt'
-    if env_cookies:
+    local_cookies = os.path.join(os.path.dirname(__file__), 'cookies.txt')
+    secret_cookies = '/etc/secrets/cookies.txt'
+    
+    if os.path.exists(local_cookies):
+        ydl_opts['cookiefile'] = local_cookies
+        print(f"✅ Found local repository cookies.txt, applying to yt-dlp...")
+    elif env_cookies:
         writable_cookies_path = os.path.join(temp_dir, 'env_cookies.txt')
         try:
             with open(writable_cookies_path, 'w', encoding='utf-8') as cf:
@@ -67,18 +72,18 @@ def download_media(url, is_audio=False, progress_callback=None):
             print(f"✅ Applying YOUTUBE_COOKIES environment variable to yt-dlp...")
         except Exception as e:
             print(f"⚠️ Error writing env cookies: {e}")
-    elif os.path.exists(cookies_path):
+    elif os.path.exists(secret_cookies):
         import shutil
         writable_cookies_path = os.path.join(temp_dir, 'cookies.txt')
         try:
-            shutil.copyfile(cookies_path, writable_cookies_path)
+            shutil.copyfile(secret_cookies, writable_cookies_path)
             ydl_opts['cookiefile'] = writable_cookies_path
-            print(f"✅ Found cookies file, copied to {writable_cookies_path} and applying to yt-dlp...")
+            print(f"✅ Found secret cookies file, copied to {writable_cookies_path} and applying to yt-dlp...")
         except Exception as e:
             print(f"⚠️ Error copying cookies file: {e}")
-            ydl_opts['cookiefile'] = cookies_path # fallback
+            ydl_opts['cookiefile'] = secret_cookies
     else:
-        print(f"⚠️ No cookies file or YOUTUBE_COOKIES env found. Using bot-bypass clients.")
+        print(f"⚠️ No cookies file found. Using bot-bypass clients.")
     
     MAX_SIZE_BYTES = 1950 * 1024 * 1024  # 1950MB safety limit
 
