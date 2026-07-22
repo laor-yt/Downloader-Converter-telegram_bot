@@ -284,14 +284,29 @@ async def private_ai_chat(client: Client, message: Message):
                 try:
                     file_path = await client.download_media(original_msg)
                     file_content = ""
-                    if original_msg.photo:
+                    image_url = None
+                    
+                    is_img = original_msg.photo or (original_msg.document and str(original_msg.document.mime_type or "").startswith("image/"))
+                    if is_img:
                         import requests
-                        with open(file_path, "rb") as f:
-                            ocr_res = requests.post("https://api.ocr.space/parse/image", files={"filename": f}, data={"apikey": "helloworld", "language": "eng"})
-                        ocr_data = ocr_res.json()
-                        if not ocr_data.get("IsErroredOnProcessing") and ocr_data.get("ParsedResults"):
-                            file_content = ocr_data["ParsedResults"][0].get("ParsedText", "").strip()
-                    elif original_msg.audio or original_msg.voice or original_msg.video:
+                        try:
+                            with open(file_path, "rb") as f:
+                                up_res = requests.post("https://tmpfiles.org/api/v1/upload", files={"file": f})
+                            up_data = up_res.json()
+                            if "data" in up_data and "url" in up_data["data"]:
+                                image_url = up_data["data"]["url"].replace("tmpfiles.org/", "tmpfiles.org/dl/")
+                        except Exception as e:
+                            print(f"Error uploading image to tmpfiles: {e}")
+                            
+                        try:
+                            with open(file_path, "rb") as f:
+                                ocr_res = requests.post("https://api.ocr.space/parse/image", files={"filename": f}, data={"apikey": "helloworld", "language": "eng"})
+                            ocr_data = ocr_res.json()
+                            if not ocr_data.get("IsErroredOnProcessing") and ocr_data.get("ParsedResults"):
+                                file_content = ocr_data["ParsedResults"][0].get("ParsedText", "").strip()
+                        except Exception as e:
+                            print(f"OCR Error: {e}")
+                    elif original_msg.audio or original_msg.voice or (original_msg.video and not original_msg.photo):
                         file_content = transcribe_audio_video(file_path)
                     elif original_msg.document:
                         mime_type = str(original_msg.document.mime_type or "")
@@ -302,9 +317,13 @@ async def private_ai_chat(client: Client, message: Message):
                             file_content = parse_document(file_path, mime_type)
                             
                     cleanup_file(file_path)
-                    prompt = f"User Request: {text}\n\nExtracted Content from File:\n{file_content if file_content else 'No readable text content'}"
-                    reply = await get_ai_response(message.chat.id, prompt)
-                    await processing_msg.edit_text(reply)
+                    
+                    prompt = text
+                    if file_content:
+                        prompt += f"\n\n[Extracted Text/Content]:\n{file_content}"
+                        
+                    reply = await get_ai_response(message.chat.id, prompt, image_url=image_url)
+                    await send_ai_reply_or_photo(message, processing_msg, reply, prompt_text=text)
                     return
                 except Exception as e:
                     print(f"Error reading file for AI: {e}")
