@@ -110,6 +110,65 @@ def _validate_and_enhance_video(raw_path: str, temp_dir: str, width=1280, height
         print(f"[VideoGen] Enhance error: {e}")
     return raw_path
 
+async def _fallback_slideshow(prompt: str, temp_dir: str, progress_callback=None) -> str | None:
+    if progress_callback: progress_callback("🎬 Generating cinematic scenes...")
+    images = []
+    for i in range(2):
+        try:
+            p = f"{prompt}, cinematic scene {i+1}, ultra-realistic, 8k, photorealistic"
+            encoded = urllib.parse.quote(p)
+            url = f"https://image.pollinations.ai/prompt/{encoded}?model=flux&width=1280&height=720&nologo=true&seed={i * 999}"
+            resp = await asyncio.to_thread(requests.get, url, timeout=60)
+            if resp.status_code == 200 and len(resp.content) > 5000:
+                p_img = os.path.join(temp_dir, f"fb_scene_{i}_{uuid.uuid4().hex}.jpg")
+                with open(p_img, "wb") as f:
+                    f.write(resp.content)
+                images.append(p_img)
+        except Exception:
+            pass
+            
+    if not images: return None
+    
+    if progress_callback: progress_callback("🎬 Animating scenes...")
+    out_path = os.path.join(temp_dir, f"fb_vid_{uuid.uuid4().hex}.mp4")
+    try:
+        inputs = []
+        for img in images:
+            inputs.extend(["-loop", "1", "-t", "4", "-i", img])
+            
+        n = len(images)
+        vf = []
+        for j in range(n):
+            vf.append(f"[{j}:v]scale=8000:-1,zoompan=z='min(zoom+0.0015,1.5)':d=96:s=1280x720[v{j}]")
+        
+        concat = "".join(f"[v{j}]" for j in range(n))
+        vf.append(f"{concat}concat=n={n}:v=1:a=0[outv]")
+        
+        cmd = [FFMPEG_EXE, "-y", *inputs, "-filter_complex", ";".join(vf), "-map", "[outv]", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-fpsmax", "24", out_path]
+        subprocess.run(cmd, capture_output=True, check=True, timeout=120)
+        
+        if os.path.exists(out_path):
+            for img in images: cleanup_file(img)
+            return out_path
+    except Exception as e:
+        print(f"Fallback slideshow error: {e}")
+        
+    return None
+
+async def _fallback_image_zoom(image_path: str, temp_dir: str, progress_callback=None) -> str | None:
+    if progress_callback: progress_callback("🎬 Applying cinematic animation...")
+    out_path = os.path.join(temp_dir, f"fb_img_vid_{uuid.uuid4().hex}.mp4")
+    try:
+        cmd = [
+            FFMPEG_EXE, "-y", "-loop", "1", "-t", "5", "-i", image_path,
+            "-vf", "scale=8000:-1,zoompan=z='min(zoom+0.0015,1.5)':d=120:s=1280x720",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-fpsmax", "24", out_path
+        ]
+        subprocess.run(cmd, capture_output=True, check=True, timeout=120)
+        if os.path.exists(out_path): return out_path
+    except Exception as e:
+        print(f"Fallback image zoom error: {e}")
+    return None
 
 def _get_duration(file_path: str) -> float:
     """Return duration of audio/video in seconds."""
@@ -167,7 +226,8 @@ async def text_to_video(prompt: str, progress_callback=None) -> str | None:
 
         print(f"[VideoGen] {model_name} failed or returned too little data.")
 
-    return None
+    print("[VideoGen] All HF models failed, running fallback generator...")
+    return await _fallback_slideshow(prompt, temp_dir, progress_callback)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -220,8 +280,10 @@ async def image_to_video(image_path: str, progress_callback=None) -> str | None:
             cleanup_file(resized_path)
             return final
 
+    print("[VideoGen] All HF I2V models failed, running fallback image zoom...")
+    final = await _fallback_image_zoom(resized_path, temp_dir, progress_callback)
     cleanup_file(resized_path)
-    return None
+    return final
 
 
 # ══════════════════════════════════════════════════════════════════════════════
