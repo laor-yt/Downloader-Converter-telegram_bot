@@ -199,7 +199,7 @@ async def handle_media(client, message):
         await message.reply_text(f"📁 **File Received:** `{file_name}`\nWhat would you like to do?", reply_markup=keyboard)
 
 class RealtimeTimer:
-    def __init__(self, message, initial_text="Processing..."):
+    def __init__(self, message, initial_text="Thinking"):
         self.message = message
         self.current_text = initial_text
         self.start_time = time.time()
@@ -211,17 +211,24 @@ class RealtimeTimer:
 
     async def _timer_loop(self):
         last_sent = ""
+        dot_count = 1
         while not self.stop_event.is_set():
             elapsed = int(time.time() - self.start_time)
             mins, secs = divmod(elapsed, 60)
-            formatted = f"⏱ [{mins:02d}:{secs:02d}] {self.current_text}"
+            
+            dots = "." * dot_count
+            dot_count = (dot_count % 3) + 1  # 1 -> 2 -> 3 -> 1 -> 2 -> 3
+            
+            clean_text = self.current_text.rstrip(". ").strip()
+            formatted = f"⏱ [{mins:02d}:{secs:02d}] {clean_text} {dots}"
+            
             if formatted != last_sent:
                 last_sent = formatted
                 try:
                     await self.message.edit_text(formatted)
                 except MessageNotModified:
                     pass
-                except Exception as e:
+                except Exception:
                     pass
             try:
                 await asyncio.sleep(1.0)

@@ -186,6 +186,8 @@ class LiveTimer:
         if self.task:
             self.task.cancel()
 
+from plugins.handlers import RealtimeTimer
+
 @Client.on_message(filters.command("ask"), group=1)
 async def ask_command(client: Client, message: Message):
     if len(message.command) < 2:
@@ -196,7 +198,7 @@ async def ask_command(client: Client, message: Message):
     prompt = message.text.split(None, 1)[1]
     
     processing_msg = await message.reply_text("⏱ [00:00] 🤔 Thinking...")
-    async with LiveTimer(processing_msg, "🤔 Thinking..."):
+    async with RealtimeTimer(processing_msg, "🤔 Thinking"):
         reply = await get_ai_response(message.chat.id, prompt)
         
     await send_ai_reply_or_photo(message, processing_msg, reply, prompt_text=prompt)
@@ -303,7 +305,7 @@ async def image_command(client: Client, message: Message):
     
     processing_msg = await message.reply_text("⏱ [00:00] 🎨 Drawing image with FLUX AI...")
     try:
-        async with LiveTimer(processing_msg, "🎨 Drawing image with FLUX AI..."):
+        async with RealtimeTimer(processing_msg, "🎨 Drawing image with FLUX AI"):
             await message.reply_photo(image_url, caption=f"🎨 `{raw_prompt}`")
         await processing_msg.delete()
     except Exception as e:
@@ -342,19 +344,19 @@ async def search_command(client: Client, message: Message):
         return
         
     query = message.text.split(None, 1)[1]
-    processing_msg = await message.reply_text(f"🔍 Searching the web for: `{query}`...")
+    processing_msg = await message.reply_text(f"⏱ [00:00] 🔍 Searching the web for: `{query}`...")
     
     try:
-        # Search web using DDGS
-        results = DDGS().text(query, max_results=3)
-        context = ""
-        for r in results:
-            context += f"- {r.get('title')}: {r.get('body')}\n"
-            
-        if not context:
-            context = "No relevant search results found."
-            
-        reply = await get_ai_response(message.chat.id, query, context=context)
+        async with RealtimeTimer(processing_msg, f"🔍 Searching the web for: `{query}`"):
+            results = DDGS().text(query, max_results=3)
+            context = ""
+            for r in results:
+                context += f"- {r.get('title')}: {r.get('body')}\n"
+                
+            if not context:
+                context = "No relevant search results found."
+                
+            reply = await get_ai_response(message.chat.id, query, context=context)
         await processing_msg.edit_text(reply)
     except Exception as e:
         print(f"Search Error: {e}")
@@ -381,8 +383,9 @@ async def group_ai_chat(client: Client, message: Message):
         if not prompt:
             return
             
-        processing_msg = await message.reply_text("🤔 Thinking...", reply_to_message_id=message.id)
-        reply = await get_ai_response(message.chat.id, prompt)
+        processing_msg = await message.reply_text("⏱ [00:00] 🤔 Thinking...", reply_to_message_id=message.id)
+        async with RealtimeTimer(processing_msg, "🤔 Thinking"):
+            reply = await get_ai_response(message.chat.id, prompt)
         
         if "image.pollinations.ai" in reply:
             await message.reply_photo(reply.strip())
@@ -535,7 +538,7 @@ async def private_ai_chat(client: Client, message: Message):
         processing_msg = await message.reply_text("⏱ [00:00] 🎨 Drawing image with FLUX AI...", reply_to_message_id=message.id)
         img_url = clean_and_generate_image_url(text)
         try:
-            async with LiveTimer(processing_msg, "🎨 Drawing image with FLUX AI..."):
+            async with RealtimeTimer(processing_msg, "🎨 Drawing image with FLUX AI"):
                 await message.reply_photo(img_url, caption=f"🎨 `{text}`")
             await processing_msg.delete()
             return
@@ -543,6 +546,6 @@ async def private_ai_chat(client: Client, message: Message):
             print(f"Error in direct drawing request: {e}")
 
     processing_msg = await message.reply_text("⏱ [00:00] 🤔 Thinking...", reply_to_message_id=message.id)
-    async with LiveTimer(processing_msg, "🤔 Thinking..."):
+    async with RealtimeTimer(processing_msg, "🤔 Thinking"):
         reply = await get_ai_response(message.chat.id, prompt)
     await send_ai_reply_or_photo(message, processing_msg, reply, prompt_text=text)
