@@ -20,7 +20,8 @@ def is_url(text):
 @Client.on_message(filters.command(["start"]) | filters.regex("^(ℹ️ Help)$"))
 async def start_command(client, message):
     welcome_message = (
-        "👋 Welcome to the **Telegram AI Bot**!\n\n"
+        "👋 Welcome to the **Telegram AI Bot (Udom)**!\n\n"
+        "⚠️ **Note:** Please wait a minute and ask again if Bot does not reply to you.\n\n"
         "To see all available commands, tap the Menu button or use the buttons below."
     )
     

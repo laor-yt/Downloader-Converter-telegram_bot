@@ -69,7 +69,11 @@ def main():
                 BotCommand("search", "Search the web"),
                 BotCommand("help", "Show help info")
             ])
-            logger.info("Bot commands menu set successfully!")
+            import requests
+            desc = "👋 Welcome to Telegram AI Bot (Udom)!\n\n⚠️ Note: Please wait a minute and ask again if Bot does not reply to you."
+            requests.post(f"https://api.telegram.org/bot{token}/setMyDescription", json={"description": desc})
+            requests.post(f"https://api.telegram.org/bot{token}/setMyShortDescription", json={"short_description": "Telegram AI Bot (Udom) - Please wait a minute and ask again if Bot does not reply."})
+            logger.info("Bot commands and description set successfully!")
         except Exception as e:
             logger.error(f"Failed to set bot commands: {e}")
             
