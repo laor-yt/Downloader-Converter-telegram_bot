@@ -174,7 +174,7 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
     
     import asyncio
     from plugins.ai_handler import get_ai_response
-    prompt = f"Translate the following spoken transcript accurately into {target_lang_name}. Output ONLY the raw translated speech text for voiceover narration and NOTHING else:\n\n{transcript}"
+    prompt = f"Translate the following spoken transcript accurately into natural spoken {target_lang_name}. Output ONLY the raw spoken sentences in {target_lang_name} script to be read aloud as a voiceover narration. Absolutely NO English words, NO headers, NO markdown, NO quotes, NO explanations:\n\n{transcript}"
     
     try:
         try:
@@ -186,9 +186,15 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
         print(f"AI Translation Error: {e}")
         translated_text = transcript
         
-    translated_text = translated_text.replace("Here is the translation:", "").replace("Translation:", "").strip()
+    # Clean text strictly for gTTS speech
+    translated_text = re.sub(r'[*#_~`>\[\]\(\)]', ' ', translated_text)
+    translated_text = re.sub(r'^(Here is|Translation|Translate|Khmer|English|Note):.*$', '', translated_text, flags=re.MULTILINE | re.IGNORECASE)
+    translated_text = " ".join(translated_text.split()).strip()
     
-    if progress_callback: progress_callback("🎙 Generating translated voiceover (dubbing)...")
+    if not translated_text:
+        return "ERROR: Translation resulted in empty speech text."
+        
+    if progress_callback: progress_callback("🎙 Generating natural voiceover dubbing...")
     from gtts import gTTS
     tts_lang = 'km' if target_lang.startswith('km') else ('zh-CN' if target_lang.startswith('zh') else target_lang[:2])
     
@@ -201,28 +207,28 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
         print(f"gTTS Error: {e}")
         return f"ERROR: Failed to generate TTS voice: {e}"
         
-    # Sync TTS voice duration to match original video duration using FFmpeg atempo filter
     final_audio_track = raw_tts_output
     if is_video:
         orig_duration = get_video_duration(input_path)
         tts_duration = get_video_duration(raw_tts_output)
         
+        # Keep speed ratio strictly within 0.90x to 1.15x so natural voice pronunciation is preserved
         if orig_duration > 0 and tts_duration > 0:
             speed_ratio = tts_duration / orig_duration
-            speed_ratio = max(0.5, min(2.0, speed_ratio))
-            try:
-                (
-                    ffmpeg
-                    .input(raw_tts_output)
-                    .filter('atempo', speed_ratio)
-                    .output(synced_tts_output)
-                    .overwrite_output()
-                    .run(capture_stdout=True, capture_stderr=True)
-                )
-                if os.path.exists(synced_tts_output) and os.path.getsize(synced_tts_output) > 0:
-                    final_audio_track = synced_tts_output
-            except Exception as e_tempo:
-                print(f"Atempo Sync Error: {e_tempo}")
+            if 0.85 <= speed_ratio <= 1.20:
+                try:
+                    (
+                        ffmpeg
+                        .input(raw_tts_output)
+                        .filter('atempo', speed_ratio)
+                        .output(synced_tts_output)
+                        .overwrite_output()
+                        .run(capture_stdout=True, capture_stderr=True)
+                    )
+                    if os.path.exists(synced_tts_output) and os.path.getsize(synced_tts_output) > 0:
+                        final_audio_track = synced_tts_output
+                except Exception as e_tempo:
+                    print(f"Atempo Sync Error: {e_tempo}")
 
     if progress_callback: progress_callback("🎬 Merging translated vocal audio with video...")
     output_ext = "mp4" if is_video else "mp3"
@@ -230,14 +236,16 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
     
     if is_video:
         try:
+            # Loop video to match full speech audio duration without freezing or voice distortion
             stream = (
                 ffmpeg
                 .output(
-                    ffmpeg.input(input_path).video,
+                    ffmpeg.input(input_path, stream_loop=-1).video,
                     ffmpeg.input(final_audio_track).audio,
                     output_path,
                     vcodec='copy',
-                    acodec='aac'
+                    acodec='aac',
+                    shortest=None
                 )
                 .overwrite_output()
             )
@@ -303,7 +311,10 @@ def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=Fal
     from gtts import gTTS
     tts_lang = 'km' if target_lang.startswith('km') else ('zh-CN' if target_lang.startswith('zh') else target_lang[:2])
     
-    tts_speech = recap_text.replace("*", "").replace("#", "").replace("-", "").strip()
+    tts_speech = re.sub(r'[*#_~`>\[\]\(\)]', ' ', recap_text)
+    tts_speech = re.sub(r'^(Here is|Summary|Recap|Khmer|English|Note):.*$', '', tts_speech, flags=re.MULTILINE | re.IGNORECASE)
+    tts_speech = " ".join(tts_speech.split()).strip()
+    
     raw_tts = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_raw.mp3")
     synced_tts = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_synced.mp3")
     
@@ -319,20 +330,21 @@ def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=Fal
         orig_dur = get_video_duration(input_path)
         tts_dur = get_video_duration(raw_tts)
         if orig_dur > 0 and tts_dur > 0:
-            ratio = max(0.5, min(2.0, tts_dur / orig_dur))
-            try:
-                (
-                    ffmpeg
-                    .input(raw_tts)
-                    .filter('atempo', ratio)
-                    .output(synced_tts)
-                    .overwrite_output()
-                    .run(capture_stdout=True, capture_stderr=True)
-                )
-                if os.path.exists(synced_tts) and os.path.getsize(synced_tts) > 0:
-                    final_audio = synced_tts
-            except Exception as e_tempo:
-                print(f"Recap Tempo Sync Error: {e_tempo}")
+            ratio = tts_dur / orig_dur
+            if 0.85 <= ratio <= 1.20:
+                try:
+                    (
+                        ffmpeg
+                        .input(raw_tts)
+                        .filter('atempo', ratio)
+                        .output(synced_tts)
+                        .overwrite_output()
+                        .run(capture_stdout=True, capture_stderr=True)
+                    )
+                    if os.path.exists(synced_tts) and os.path.getsize(synced_tts) > 0:
+                        final_audio = synced_tts
+                except Exception as e_tempo:
+                    print(f"Recap Tempo Sync Error: {e_tempo}")
                 
     output_ext = "mp4" if is_video else "mp3"
     output_path = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_dubbed.{output_ext}")
@@ -342,11 +354,12 @@ def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=Fal
             stream = (
                 ffmpeg
                 .output(
-                    ffmpeg.input(input_path).video,
+                    ffmpeg.input(input_path, stream_loop=-1).video,
                     ffmpeg.input(final_audio).audio,
                     output_path,
                     vcodec='copy',
-                    acodec='aac'
+                    acodec='aac',
+                    shortest=None
                 )
                 .overwrite_output()
             )
