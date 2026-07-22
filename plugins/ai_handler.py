@@ -80,7 +80,7 @@ Whenever users ask about Khmer measurement conversions (e.g., ជី, តម្�
 
 CRITICAL INSTRUCTION FOR IMAGES:
 You have a special built-in image generator. If the user asks you to generate, draw, or create an image/picture, DO NOT apologize and DO NOT say you reached a limit. You MUST reply with this exact URL format and NOTHING else:
-https://image.pollinations.ai/prompt/{description_with_underscores},_photorealistic?width=1024&height=1024&nologo=true
+https://image.pollinations.ai/prompt/{description_with_underscores},_photorealistic?width=1920&height=1080&nologo=true
 Replace {description_with_underscores} with the requested image description (in English).
 
 CRITICAL INSTRUCTION FOR VIDEOS:
@@ -124,7 +124,7 @@ async def get_ai_response(chat_id, user_prompt, image_url=None, context=""):
         # Intercept DALL-E limit hallucinations from the underlying OpenAI model
         if "limit for generating" in reply.lower() or "limit for creating" in reply.lower() or "sign in" in reply.lower():
             safe_prompt = user_prompt.replace(" ", "_")
-            reply = f"https://image.pollinations.ai/prompt/{safe_prompt},_photorealistic?width=1024&height=1024&nologo=true"
+            reply = f"https://image.pollinations.ai/prompt/{safe_prompt},_photorealistic?width=1920&height=1080&nologo=true"
         
         # Add AI reply to history
         chat_history[chat_id].append({"role": "assistant", "content": reply})

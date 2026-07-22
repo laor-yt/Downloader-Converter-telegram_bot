@@ -65,7 +65,7 @@ def transcribe_audio_video(file_path: str) -> str:
     temp_mp3 = f"temp_{uuid.uuid4().hex}.mp3"
     
     try:
-        # Extract audio track to lightweight 32k mono format
+        # Extract audio track - use 24kHz 64kbps for clearer speech fidelity
         audio = AudioSegment.from_file(file_path)
         
         # Limit max duration to 3 hours (10,800,000 ms = 180 minutes)
@@ -73,10 +73,11 @@ def transcribe_audio_video(file_path: str) -> str:
         if len(audio) > max_3hr_ms:
             audio = audio[:max_3hr_ms]
             
-        audio_mono = audio.set_frame_rate(16000).set_channels(1)
-        audio_mono.export(temp_mp3, format="mp3", bitrate="32k")
+        # 24kHz mono, 64kbps — high enough quality for accurate speech recognition
+        audio_mono = audio.set_frame_rate(24000).set_channels(1)
+        audio_mono.export(temp_mp3, format="mp3", bitrate="64k")
         
-        # 1. Try Gemini 1.5 Flash Vision / Audio AI
+        # 1. Try Gemini Flash for exact verbatim transcription (temperature=0)
         api_key = os.environ.get("GEMINI_API_KEY")
         if api_key and os.path.exists(temp_mp3):
             try:
@@ -91,26 +92,50 @@ def transcribe_audio_video(file_path: str) -> str:
                 for p_start in range(0, total_len, part_duration_ms):
                     part_audio = audio_mono[p_start : min(p_start + part_duration_ms, total_len)]
                     temp_part = f"temp_part_{uuid.uuid4().hex}.mp3"
-                    part_audio.export(temp_part, format="mp3", bitrate="32k")
+                    part_audio.export(temp_part, format="mp3", bitrate="64k")
                     
                     try:
                         with open(temp_part, "rb") as f:
                             b64 = base64.b64encode(f.read()).decode("utf-8")
-                            
-                        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-                        payload = {
-                            "contents": [{
-                                "parts": [
-                                    {"text": "You are an expert multilingual audio transcriber. Transcribe 100% of ALL spoken words in this audio in its ORIGINAL spoken language (Khmer, English, Chinese, Vietnamese, Thai, Korean, Japanese, French, Spanish, German, Russian, Arabic, Hindi, etc.) with exact precision. Do not skip any sentence or word. Output ONLY the raw spoken transcript text in the original spoken language script, without any intro/outro text."},
-                                    {"inline_data": {"mime_type": "audio/mp3", "data": b64}}
-                                ]
-                            }]
-                        }
-                        res = requests.post(url, json=payload, timeout=90).json()
-                        if "candidates" in res and res["candidates"]:
-                            p_text = res["candidates"][0]["content"]["parts"][0]["text"].strip()
-                            if p_text:
-                                gemini_transcripts.append(p_text)
+                        
+                        # Use gemini-2.0-flash for best accuracy, fallback to 1.5-flash
+                        for model in ["gemini-2.0-flash", "gemini-1.5-flash"]:
+                            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                            payload = {
+                                "generationConfig": {
+                                    "temperature": 0.0,
+                                    "topP": 0.05,
+                                    "topK": 1
+                                },
+                                "contents": [{
+                                    "parts": [
+                                        {
+                                            "text": (
+                                                "You are a VERBATIM speech-to-text transcription engine with zero tolerance for errors.\n"
+                                                "TASK: Transcribe EVERY SINGLE WORD spoken in this audio EXACTLY as it was said.\n"
+                                                "CRITICAL RULES:\n"
+                                                "1. Write ONLY what is actually spoken — never substitute, paraphrase, or guess a different word.\n"
+                                                "2. If a speaker says 'apple', you MUST write 'apple' — NOT 'banana', NOT 'fruit', NOT any other word.\n"
+                                                "3. Detect the spoken language automatically (Khmer, English, Chinese, Vietnamese, Thai, Korean, Japanese, French, Spanish, German, Russian, Arabic, Hindi, etc.) and transcribe in the ORIGINAL language script.\n"
+                                                "4. Do NOT add titles, headers, timestamps, descriptions, or any commentary — output the raw spoken words ONLY.\n"
+                                                "5. Preserve all proper nouns, names, numbers, and punctuation exactly as spoken.\n"
+                                                "6. If a section is inaudible, write [inaudible] — do NOT invent words."
+                                            )
+                                        },
+                                        {"inline_data": {"mime_type": "audio/mp3", "data": b64}}
+                                    ]
+                                }]
+                            }
+                            try:
+                                res = requests.post(url, json=payload, timeout=120).json()
+                                if "candidates" in res and res["candidates"]:
+                                    p_text = res["candidates"][0]["content"]["parts"][0]["text"].strip()
+                                    if p_text and len(p_text) > 3:
+                                        gemini_transcripts.append(p_text)
+                                        break  # success, stop trying other models
+                            except Exception as model_e:
+                                print(f"Gemini {model} transcription error: {model_e}")
+                                continue
                     finally:
                         if os.path.exists(temp_part):
                             os.remove(temp_part)
