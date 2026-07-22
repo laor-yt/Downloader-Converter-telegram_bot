@@ -217,32 +217,60 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
             if m:
                 translated_lines[int(m.group(1))] = m.group(2).strip()
 
-        if progress_callback: progress_callback("🎙 Generating timed voiceover segments...")
+        if progress_callback: progress_callback("🎙 Generating timed voiceover segments (mouth-sync)...")
 
-        # Generate TTS for each segment and record file + delay
-        tts_clips = []  # list of (delay_ms, tts_path)
+        # Generate TTS for each segment, speed-fit to slot, then adelay to start time
+        tts_clips = []  # list of (delay_ms, fitted_tts_path)
         for i, (start_sec, end_sec, orig_text) in enumerate(timed_segments):
             seg_num = i + 1
             translated_text = translated_lines.get(seg_num, orig_text)
-            # Clean text
             translated_text = re.sub(r'[*#_~`>\[\]\(\)]', ' ', translated_text)
             translated_text = " ".join(translated_text.split()).strip()
             if not translated_text:
                 continue
 
-            tts_path = os.path.join(temp_dir, f"seg_{i}_{uuid.uuid4().hex}.mp3")
+            slot_dur = max(0.3, end_sec - start_sec)  # original speech slot duration
+            raw_seg = os.path.join(temp_dir, f"seg_raw_{i}_{uuid.uuid4().hex}.mp3")
             try:
                 tts = gTTS(text=translated_text, lang=tts_lang, slow=False)
-                tts.save(tts_path)
-                if os.path.exists(tts_path) and os.path.getsize(tts_path) > 0:
-                    delay_ms = max(0, int(start_sec * 1000))
-                    tts_clips.append((delay_ms, tts_path))
+                tts.save(raw_seg)
+                if not (os.path.exists(raw_seg) and os.path.getsize(raw_seg) > 0):
+                    continue
+
+                # ── Mouth-sync: speed-fit TTS to slot duration ──────────────
+                tts_seg_dur = get_video_duration(raw_seg)
+                fitted_seg = raw_seg
+                if tts_seg_dur > 0 and tts_seg_dur != slot_dur:
+                    speed_ratio = tts_seg_dur / slot_dur  # >1 means TTS is slower than slot
+                    # Clamp: don't go faster than 2.0x or slower than 0.6x
+                    speed_ratio = max(0.6, min(2.0, speed_ratio))
+                    if abs(speed_ratio - 1.0) > 0.05:  # only adjust if >5% difference
+                        fitted_path = os.path.join(temp_dir, f"seg_fit_{i}_{uuid.uuid4().hex}.mp3")
+                        try:
+                            # atempo supports 0.5–2.0; chain two filters for ratios > 2.0
+                            if speed_ratio > 2.0:
+                                af = f"atempo=2.0,atempo={speed_ratio/2.0:.4f}"
+                            else:
+                                af = f"atempo={speed_ratio:.4f}"
+                            subprocess.run(
+                                [ffmpeg_exe, "-y", "-i", raw_seg,
+                                 "-af", af,
+                                 "-t", str(slot_dur),  # hard-trim to slot length
+                                 fitted_path],
+                                capture_output=True, check=True
+                            )
+                            if os.path.exists(fitted_path) and os.path.getsize(fitted_path) > 0:
+                                fitted_seg = fitted_path
+                        except Exception as tempo_e:
+                            print(f"atempo fit error seg {i}: {tempo_e}")
+
+                delay_ms = max(0, int(start_sec * 1000))
+                tts_clips.append((delay_ms, fitted_seg))
             except Exception as tts_e:
                 print(f"TTS error for segment {i}: {tts_e}")
 
         if tts_clips:
-            if progress_callback: progress_callback("🔀 Assembling timed dubbed audio track...")
-            # Build FFmpeg filter_complex with adelay per segment
+            if progress_callback: progress_callback("🔀 Assembling mouth-synced dubbed audio track...")
             dubbed_audio_path = os.path.join(temp_dir, f"timed_dub_{uuid.uuid4().hex}.mp3")
             inputs_cmd = []
             filter_parts = []
@@ -250,7 +278,7 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
                 inputs_cmd += ["-i", tts_path]
                 filter_parts.append(f"[{idx}:a]adelay={delay_ms}|{delay_ms}[a{idx}]")
             n = len(tts_clips)
-            refs = "".join(f"[a{i}]" for i in range(n))
+            refs = "".join(f"[a{j}]" for j in range(n))
             filter_complex = ";".join(filter_parts) + f";{refs}amix=inputs={n}:duration=longest:dropout_transition=0[dub]"
 
             timed_ok = False
@@ -258,16 +286,17 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
                 cmd = [ffmpeg_exe, "-y"] + inputs_cmd + [
                     "-filter_complex", filter_complex,
                     "-map", "[dub]",
-                    "-t", str(orig_dur) if orig_dur > 0 else [],
                     dubbed_audio_path
                 ]
-                subprocess.run([x for x in cmd if x != []], capture_output=True, check=True)
+                if orig_dur > 0:
+                    cmd = cmd[:-1] + ["-t", str(orig_dur), dubbed_audio_path]
+                subprocess.run(cmd, capture_output=True, check=True)
                 timed_ok = os.path.exists(dubbed_audio_path) and os.path.getsize(dubbed_audio_path) > 0
             except Exception as asm_e:
                 print(f"Timed assembly error: {asm_e}")
 
             if timed_ok:
-                # Pad to full video length if needed
+                # Pad assembled dub to full video length
                 tts_dur = get_video_duration(dubbed_audio_path)
                 if orig_dur > 0 and tts_dur < orig_dur:
                     padded_path = os.path.join(temp_dir, f"padded_timed_{uuid.uuid4().hex}.mp3")
@@ -282,14 +311,10 @@ def translate_and_dub_media(input_path, target_lang='km', is_video=True, progres
                     except Exception as pad_e:
                         print(f"Timed pad error: {pad_e}")
 
-                # Mix with original background audio at 20%
                 final_audio_path = _mix_bg_with_dub(input_path, dubbed_audio_path, orig_dur, temp_dir, ffmpeg_exe)
-
-                # Merge into video
-                if progress_callback: progress_callback("🎬 Merging timed dubbed audio with video...")
+                if progress_callback: progress_callback("🎬 Merging mouth-synced dubbed audio with video...")
                 return _merge_audio_into_video(input_path, final_audio_path, orig_dur, is_video, temp_dir, progress_callback)
 
-            # Cleanup segment files
             for _, f in tts_clips:
                 if os.path.exists(f): os.remove(f)
 
@@ -410,34 +435,45 @@ def _merge_audio_into_video(input_path, audio_path, orig_dur, is_video, temp_dir
 def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=False, progress_callback=None):
     """
     1. Transcribes full speech in media.
-    2. Uses Udom AI to generate a concise, structured Recap / Summary of the video/audio.
-    3. If voiceover=True, converts the recap into spoken TTS voice and merges it into video/audio.
+    2. AI generates a SHORT structured Recap/Summary (NOT a full translation).
+    3. If voiceover=True, speaks the recap summary once at the start of the video
+       with background audio mixed in at 20% volume.
     """
+    import asyncio
+    import subprocess
     temp_dir = get_temp_dir()
-    
+
     from plugins.document_parser import transcribe_audio_video
-    if progress_callback: progress_callback("⏳ Transcribing media content for AI Recap...")
+    if progress_callback: progress_callback("⏳ Transcribing media for AI Recap...")
     transcript = transcribe_audio_video(input_path)
-    
+
     if not transcript or "Error" in transcript or "Unsupported" in transcript or len(transcript.strip()) < 3:
         return "ERROR: Could not extract speech from media to generate recap.", None
-        
-    lang_names = {'km': 'Khmer', 'en': 'English', 'zh': 'Chinese (Mandarin)', 'fr': 'French', 'es': 'Spanish', 'ja': 'Japanese'}
+
+    lang_names = {
+        'km': 'Khmer', 'en': 'English', 'zh': 'Chinese (Mandarin)',
+        'fr': 'French', 'es': 'Spanish', 'ja': 'Japanese',
+        'ko': 'Korean', 'de': 'German', 'vi': 'Vietnamese', 'th': 'Thai'
+    }
     target_lang_name = lang_names.get(target_lang[:2], 'Khmer')
-    
-    if progress_callback: progress_callback(f"🧠 Generating AI Video Recap in {target_lang_name}...")
-    
-    import asyncio
+
+    if progress_callback: progress_callback(f"🧠 Generating SHORT AI Recap in {target_lang_name}...")
+
     from plugins.ai_handler import get_ai_response
+    # Limit transcript to 8000 chars to avoid AI context overflow
+    trimmed_transcript = transcript[:8000]
     prompt = (
-        f"You are Udom AI. Please create a clear, engaging, and concise Recap & Summary of the following video/audio transcript in {target_lang_name}.\n"
-        f"Include:\n"
-        f"1. 📌 Key Highlights & Main Points\n"
-        f"2. 💡 Summary of Story / Discussion\n"
-        f"3. 🎯 Main Takeaways\n\n"
-        f"Transcript:\n{transcript}"
+        f"You are Udom AI — a professional video summarizer.\n"
+        f"Create a SHORT, spoken-style Recap of this video/audio transcript in {target_lang_name}.\n"
+        f"CRITICAL RULES:\n"
+        f"1. DO NOT translate the full transcript — only summarize it.\n"
+        f"2. The recap must be SHORT — 5 to 10 sentences maximum.\n"
+        f"3. Write in natural spoken {target_lang_name} that sounds good when read aloud.\n"
+        f"4. Include: main topic, key points, and conclusion.\n"
+        f"5. Output ONLY the recap text — no headers, no markdown, no bullets.\n\n"
+        f"Transcript:\n{trimmed_transcript}"
     )
-    
+
     try:
         try:
             loop = asyncio.get_running_loop()
@@ -447,77 +483,69 @@ def recap_video_audio(input_path, target_lang='km', is_video=True, voiceover=Fal
     except Exception as e:
         print(f"AI Recap Error: {e}")
         recap_text = f"Failed to generate recap: {e}"
-        
+
     if not voiceover:
         return recap_text, None
-        
-    # Generate Voiceover Recap Video/Audio
-    if progress_callback: progress_callback("🎙 Generating Voiceover Recap audio...")
+
+    # ── Voiceover: speak the recap summary once, play over video ─────────────
+    if progress_callback: progress_callback("🎙 Generating Recap voiceover audio...")
     from gtts import gTTS
     tts_lang = 'km' if target_lang.startswith('km') else ('zh-CN' if target_lang.startswith('zh') else target_lang[:2])
-    
+
     tts_speech = re.sub(r'[*#_~`>\[\]\(\)]', ' ', recap_text)
-    tts_speech = re.sub(r'^(Here is|Summary|Recap|Khmer|English|Note):.*$', '', tts_speech, flags=re.MULTILINE | re.IGNORECASE)
+    tts_speech = re.sub(
+        r'^(Here is|Summary|Recap|Khmer|English|Note|Translation):.*$', '',
+        tts_speech, flags=re.MULTILINE | re.IGNORECASE
+    )
     tts_speech = " ".join(tts_speech.split()).strip()
-    
+    if not tts_speech:
+        return recap_text, None
+
     raw_tts = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_raw.mp3")
-    studio_tts = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_studio.mp3")
-    synced_tts = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_synced.mp3")
-    
     try:
         tts = gTTS(text=tts_speech, lang=tts_lang, slow=False)
         tts.save(raw_tts)
-        
-        # Apply professional audio studio filtering
+        # Studio EQ
+        studio_tts = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_studio.mp3")
         try:
-            (
-                ffmpeg
-                .input(raw_tts)
-                .filter('highpass', f=80)
-                .filter('lowpass', f=12000)
-                .filter('volume', 1.2)
-                .output(studio_tts)
-                .overwrite_output()
-                .run(capture_stdout=True, capture_stderr=True)
-            )
+            (ffmpeg.input(raw_tts)
+             .filter('highpass', f=80).filter('lowpass', f=12000).filter('volume', 1.2)
+             .output(studio_tts).overwrite_output()
+             .run(capture_stdout=True, capture_stderr=True))
             if os.path.exists(studio_tts) and os.path.getsize(studio_tts) > 0:
                 raw_tts = studio_tts
-        except Exception as filter_e:
-            print(f"Recap Audio filter error: {filter_e}")
+        except Exception as eq_e:
+            print(f"Recap EQ error: {eq_e}")
     except Exception as e:
         print(f"Recap TTS Error: {e}")
         return recap_text, None
-        
-    final_audio = raw_tts
 
-    import subprocess
-    orig_dur = get_video_duration(input_path)
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    orig_dur = get_video_duration(input_path)
+    recap_dur = get_video_duration(raw_tts)
 
-    # Pad recap audio to full video length if shorter
-    tts_dur = get_video_duration(final_audio)
-    if orig_dur > 0 and tts_dur < orig_dur:
-        padded_path = os.path.join(temp_dir, f"{uuid.uuid4()}_padded_recap.mp3")
+    # Recap voice plays once at start; pad remainder with silence up to orig_dur
+    # so the full video plays while background audio continues
+    final_recap_audio = raw_tts
+    if orig_dur > 0 and recap_dur < orig_dur:
+        padded_path = os.path.join(temp_dir, f"{uuid.uuid4()}_recap_padded.mp3")
         try:
             subprocess.run(
-                [ffmpeg_exe, "-y", "-i", final_audio,
-                 "-af", f"apad=whole_dur={orig_dur}", "-t", str(orig_dur), padded_path],
+                [ffmpeg_exe, "-y", "-i", raw_tts,
+                 "-af", f"apad=whole_dur={orig_dur}",
+                 "-t", str(orig_dur), padded_path],
                 capture_output=True, check=True
             )
             if os.path.exists(padded_path) and os.path.getsize(padded_path) > 0:
-                final_audio = padded_path
+                final_recap_audio = padded_path
         except Exception as pad_e:
-            print(f"Recap apad error: {pad_e}")
+            print(f"Recap pad error: {pad_e}")
 
-    # Mix background audio (20%) with recap voice (100%)
-    final_audio = _mix_bg_with_dub(input_path, final_audio, orig_dur, temp_dir, ffmpeg_exe)
+    # Mix: background original audio at 20% + recap voice at 100%
+    final_audio = _mix_bg_with_dub(input_path, final_recap_audio, orig_dur, temp_dir, ffmpeg_exe)
 
-    if progress_callback: progress_callback("🎬 Merging recap audio with video...")
+    if progress_callback: progress_callback("🎬 Merging recap voiceover with video...")
     res_media = _merge_audio_into_video(input_path, final_audio, orig_dur, is_video, temp_dir, progress_callback)
-
-    cleanup_file(raw_tts)
-    if os.path.exists(synced_tts) and final_audio != synced_tts:
-        cleanup_file(synced_tts)
 
     return recap_text, res_media
 
