@@ -60,7 +60,19 @@ def main():
         plugins=dict(root="plugins")
     )
     
-    app.start()
+    import time
+    from pyrogram.errors import FloodWait
+
+    while True:
+        try:
+            app.start()
+            break
+        except FloodWait as e:
+            logger.warning(f"Telegram FloodWait: waiting {e.value}s before retrying auth...")
+            time.sleep(e.value + 2)
+        except Exception as e:
+            logger.error(f"Failed to start Pyrogram client: {e}")
+            raise e
 
     # ── Recover missed messages from while the bot was offline ────────────
     async def run_recovery():
